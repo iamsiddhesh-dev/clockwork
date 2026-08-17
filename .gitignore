@@ -1,3 +1,6 @@
+# Private planning docs — not part of the public submission
+PLAN.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
