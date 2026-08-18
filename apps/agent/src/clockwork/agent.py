@@ -16,7 +16,7 @@ from strands import Agent
 from .audit import AuditTrail
 from .context import run_context
 from .db import get_client
-from .ledger import record_usage, resolve_role
+from .ledger import record_usage, resolve_role, total_run_cost_usd
 from .models import Role, get_model
 from .tools import ALL_TOOLS
 
@@ -80,9 +80,12 @@ def run_agent(trigger: Trigger) -> AgentRun:
                 callback_handler=None,
             )
             result = orchestrator(trigger.prompt)
-            cost = record_usage(
-                user_id=trigger.user_id, run_id=run_id, role=role, result=result
-            )
+            record_usage(user_id=trigger.user_id, run_id=run_id, role=role, result=result)
+            # Sum *all* model calls this run made, not just the orchestrator's
+            # own -- tool calls (qualify_lead, draft_reply, ...) invoke their
+            # own models and would otherwise be silently dropped from the
+            # run's reported cost. See ledger.total_run_cost_usd.
+            cost = total_run_cost_usd(run_id)
 
         outcome = str(result)
         client.table("agent_run").update(

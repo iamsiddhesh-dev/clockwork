@@ -37,6 +37,17 @@ def _daily_spend_cap(user_id: str) -> float:
     return float(res.data["daily_spend_cap_usd"])
 
 
+def total_run_cost_usd(run_id: str) -> float:
+    """Sum every token_ledger row for a run -- the orchestrator's own call
+    *plus* every tool-invoked sub-call (extractor/writer). The orchestrator
+    call alone understates real cost whenever tools call a model, which is
+    every non-trivial run; this is what `agent_run.total_cost_usd` and the
+    Run Trace view's per-run number must actually use."""
+    res = get_client().table("token_ledger").select("cost_usd").eq("run_id", run_id).execute()
+    rows = res.data or []
+    return sum(float(r["cost_usd"]) for r in rows)
+
+
 def spent_today_usd(user_id: str) -> float:
     start_of_day = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
