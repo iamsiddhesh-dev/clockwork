@@ -91,14 +91,14 @@ def record_usage(
     output_tokens = int(usage.get("outputTokens", 0))
     cost = _cost_usd(role, input_tokens, output_tokens)
 
-    from .models import MODEL_IDS
+    from .models import current_model_id
 
     get_client().table("token_ledger").insert(
         {
             "user_id": user_id,
             "run_id": run_id,
             "role": role.value,
-            "model_id": MODEL_IDS[role],
+            "model_id": current_model_id(role),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": cost,
@@ -124,7 +124,11 @@ def invoke_model(
 
     resolved_role = resolve_role(user_id, role, run_id=run_id)
     model = get_model(resolved_role)
-    agent = Agent(model=model, system_prompt=system_prompt)
+    # callback_handler=None: this is a server-side call, not an interactive
+    # CLI session -- streaming tokens to stdout by default both pollutes
+    # server logs and crashes on non-UTF8 consoles (confirmed on Windows
+    # cp1252 during Groq smoke-testing, Aug 18).
+    agent = Agent(model=model, system_prompt=system_prompt, callback_handler=None)
 
     result = agent(prompt, structured_output_model=structured_output_model)
     record_usage(user_id=user_id, run_id=run_id, role=resolved_role, result=result)

@@ -75,6 +75,9 @@ def run_agent(trigger: Trigger) -> AgentRun:
                 tools=ALL_TOOLS,
                 system_prompt=SYSTEM_PROMPT,
                 hooks=[AuditTrail(run_id, trigger.user_id)],
+                # Server-side call, not an interactive CLI session -- see
+                # ledger.invoke_model's identical note.
+                callback_handler=None,
             )
             result = orchestrator(trigger.prompt)
             cost = record_usage(

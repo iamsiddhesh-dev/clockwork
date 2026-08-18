@@ -15,5 +15,12 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     aws_region: str = "us-east-1"
 
+    # Dev-time model provider switch. "bedrock" is the real target (see
+    # PLAN.md's model routing table); "groq" is a temporary stand-in while
+    # the Bedrock account-level hold is pending -- same Role interface,
+    # same call sites, swap back by changing this one setting.
+    model_provider: str = "bedrock"
+    groq_api_key: str | None = None
+
 
 settings = Settings()
