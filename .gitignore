@@ -2,6 +2,10 @@
 PLAN.md
 plan/
 
+# Local Claude Code config (e.g. launch.json) — machine-specific, not part
+# of the public submission
+.claude/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
