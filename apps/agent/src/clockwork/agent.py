@@ -79,6 +79,16 @@ def run_agent(trigger: Trigger) -> AgentRun:
                 # ledger.invoke_model's identical note.
                 callback_handler=None,
             )
+            # Deliberately NOT wrapped in call_with_retry: this single call
+            # may run several tools internally (qualify_lead, draft_reply,
+            # ...) before returning. A 429 that surfaces after some of
+            # those already ran their side effects would, on blind retry,
+            # re-run the whole prompt and could duplicate e.g. an approval
+            # row. Retrying is only safe at the granularity of one tool's
+            # own model call (see ledger.invoke_model), where nothing has
+            # happened yet by the time the model call itself fails. An
+            # uncaught 429 here just fails the run cleanly instead --
+            # safer than a retry that might double-send.
             result = orchestrator(trigger.prompt)
             record_usage(user_id=trigger.user_id, run_id=run_id, role=role, result=result)
             # Sum *all* model calls this run made, not just the orchestrator's

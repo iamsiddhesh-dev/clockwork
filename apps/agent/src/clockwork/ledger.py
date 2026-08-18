@@ -16,6 +16,7 @@ from strands.agent.agent_result import AgentResult
 from .context import current_run_id, current_user_id
 from .db import get_client
 from .models import Role, get_model, pricing_per_million
+from .retry import call_with_retry
 
 
 def _cost_usd(role: Role, input_tokens: int, output_tokens: int) -> float:
@@ -141,6 +142,8 @@ def invoke_model(
     # cp1252 during Groq smoke-testing, Aug 18).
     agent = Agent(model=model, system_prompt=system_prompt, callback_handler=None)
 
-    result = agent(prompt, structured_output_model=structured_output_model)
+    result = call_with_retry(
+        lambda: agent(prompt, structured_output_model=structured_output_model)
+    )
     record_usage(user_id=user_id, run_id=run_id, role=resolved_role, result=result)
     return result

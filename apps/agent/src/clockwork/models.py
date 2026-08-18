@@ -41,14 +41,17 @@ BEDROCK_MODEL_IDS = {
     Role.EXTRACTOR: "amazon.nova-lite-v1:0",
 }
 
-# Groq, via LiteLLM (`groq/<model>`). gpt-oss-120b handles tool-calling
-# reasoning + client-facing prose; gpt-oss-20b is the cheap/fast extractor.
-# Dev stand-in only -- never the writer role's final home, see module
-# docstring; watermark-avoidance is a Bedrock/Nova property, not something
-# Groq needs to satisfy.
+# Groq, via LiteLLM (`groq/<model>`). Free-tier limits are per-model, not
+# per-org (30 RPM / 8,000 TPM / 1,000 RPD each -- confirmed against Groq's
+# docs, Aug 18). ORCHESTRATOR alone measured ~7.5k tokens in a single real
+# run -- putting WRITER on the same model would share that same 8k TPM
+# pool and risk tipping it over on one run. Splitting them onto separate
+# models gives each its own budget. Dev stand-in only -- never the writer
+# role's final home, see module docstring; watermark-avoidance is a
+# Bedrock/Nova property, not something Groq needs to satisfy.
 GROQ_MODEL_IDS = {
     Role.ORCHESTRATOR: "groq/openai/gpt-oss-120b",
-    Role.WRITER: "groq/openai/gpt-oss-120b",
+    Role.WRITER: "groq/openai/gpt-oss-20b",
     Role.EXTRACTOR: "groq/openai/gpt-oss-20b",
 }
 
@@ -58,9 +61,9 @@ _BEDROCK_STATIC_PRICING = {
     Role.WRITER: (0.80, 3.20),
 }
 _GROQ_PRICING = {
-    Role.ORCHESTRATOR: (0.15, 0.60),
-    Role.WRITER: (0.15, 0.60),
-    Role.EXTRACTOR: (0.075, 0.30),
+    Role.ORCHESTRATOR: (0.15, 0.60),  # gpt-oss-120b
+    Role.WRITER: (0.075, 0.30),  # gpt-oss-20b, own rate-limit pool from ORCHESTRATOR
+    Role.EXTRACTOR: (0.075, 0.30),  # gpt-oss-20b
 }
 
 
