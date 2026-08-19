@@ -70,7 +70,7 @@ create table task (
     subject_type      text not null,   -- e.g. 'deal' | 'invoice'
     subject_id        uuid not null,
     due_at            timestamptz not null,
-    status            text not null default 'pending',  -- pending|done|cancelled|failed
+    status            text not null default 'pending',  -- pending|running|done|cancelled|failed
     attempts          integer not null default 0,
     payload           jsonb default '{}',
     idempotency_key   text unique,

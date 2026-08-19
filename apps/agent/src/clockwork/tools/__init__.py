@@ -11,6 +11,7 @@ from .batch_a import (
     qualify_lead,
     recall,
 )
+from .scheduling import schedule_task
 
 ALL_TOOLS = [
     recall,
@@ -19,6 +20,7 @@ ALL_TOOLS = [
     extract_requirements,
     qualify_lead,
     draft_reply,
+    schedule_task,
 ]
 
 __all__ = ["ALL_TOOLS", "create_approval"]

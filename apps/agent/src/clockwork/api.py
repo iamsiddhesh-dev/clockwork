@@ -13,6 +13,10 @@ Routes (Phase 1 Day 4-5 scope):
   POST  /approvals/{id}/reject     -> reject, no side effect
   POST  /intake/{slug}             -> public, no auth -- creates thread +
                                        message, fires a run
+  GET   /clock?user_id=...         -> current virtual time for a user
+  POST  /clock/advance             -> demo control: fast-forward + drain
+                                       any tasks that become due
+  POST  /clock/reset               -> demo control: back to real time
   GET   /health
 
 Gmail OAuth (inbound polling / send) is not wired here yet -- see
@@ -22,22 +26,57 @@ before any code can use it.
 No auth on this API yet -- the Next.js frontend (apps/web) calls it
 directly with a user_id it's been given out of band (env var, no login
 flow). Fine for local/demo use; real auth is a later Phase 1/4 item.
+
+Background: an APScheduler job polls `scheduler.tick_all_due()` every 30s
+so tasks fire in real time too, not only right after `/clock/advance`
+(see `lifespan` below) -- the "Worker loop (APScheduler)" from PLAN.md's
+architecture diagram.
 """
 
 import asyncio
 import json
+import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from . import clock
 from .agent import Trigger, run_agent
 from .db import get_client
 from .executor import execute_approval
+from .scheduler import tick, tick_all_due
 
-app = FastAPI(title="Clockwork Agent API")
+logger = logging.getLogger("clockwork.scheduler")
+
+
+def _poll_tick() -> None:
+    try:
+        fired = tick_all_due()
+        if fired:
+            logger.info("background tick fired %d task(s)", len(fired))
+    except Exception:
+        # A bad poll must never kill the background job itself -- log and
+        # let the next tick (30s away) try again.
+        logger.exception("background tick_all_due() failed")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    background_scheduler = BackgroundScheduler()
+    background_scheduler.add_job(_poll_tick, "interval", seconds=30, id="tick_all_due")
+    background_scheduler.start()
+    try:
+        yield
+    finally:
+        background_scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Clockwork Agent API", lifespan=lifespan)
 
 # Dev-only CORS: the Next.js dev server runs on a different origin than
 # this API. Tighten this to the deployed frontend's real origin before
@@ -312,3 +351,38 @@ def intake(user_id: str, req: IntakeRequest) -> dict:
     )
 
     return {"thread_id": thread_id, "deal_id": deal_id, "run_id": run.id, "run_status": run.status}
+
+
+# ── virtual clock ───────────────────────────────────────────────────────
+#
+# The demo unlock: every time read in the codebase goes through clock.now()
+# (see clock.py's own docstring), so pushing a user's offset forward here
+# and immediately draining their due tasks makes the follow-up ladder
+# fire and become visible in seconds instead of requiring an actual wait.
+
+
+class ClockAdvanceRequest(BaseModel):
+    user_id: str
+    days: float
+
+
+class ClockUserRequest(BaseModel):
+    user_id: str
+
+
+@app.get("/clock")
+def get_clock(user_id: str) -> dict:
+    return {"now": clock.now(user_id).isoformat()}
+
+
+@app.post("/clock/advance")
+def advance_clock(req: ClockAdvanceRequest) -> dict:
+    new_now = clock.advance(req.user_id, req.days)
+    fired = tick(req.user_id)
+    return {"now": new_now.isoformat(), "fired": fired}
+
+
+@app.post("/clock/reset")
+def reset_clock(req: ClockUserRequest) -> dict:
+    new_now = clock.reset(req.user_id)
+    return {"now": new_now.isoformat()}

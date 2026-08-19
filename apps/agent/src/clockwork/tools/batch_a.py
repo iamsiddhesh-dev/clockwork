@@ -11,6 +11,7 @@ from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import ExtractedRequirements, LeadScore
 from .approvals import create_approval
+from .scheduling import write_task
 
 
 @tool
@@ -198,6 +199,11 @@ def draft_reply(thread_id: str) -> dict:
     Amazon Nova Pro, kept off Claude entirely (no Anthropic watermark
     exposure on outbound content). Does NOT send anything itself.
 
+    Also schedules a follow-up check-in a few days out, in case the
+    client goes quiet -- guaranteed, not left to the orchestrator's
+    judgement, since a run only fires once and there's nothing else that
+    would remember to look again later.
+
     Args:
         thread_id: The conversation to reply within.
     """
@@ -234,7 +240,21 @@ def draft_reply(thread_id: str) -> dict:
         state_diff={"thread_id": thread_id, "new_outbound_message": True},
     )
 
+    task_id = write_task(
+        kind="follow_up",
+        subject_type="thread",
+        subject_id=thread_id,
+        due_in_days=3,
+        reason=(
+            "A reply was drafted for this thread; check whether the client "
+            "responded before nudging -- if the reply was never approved or "
+            "sent, or the client already replied, no action is needed."
+        ),
+    )
+
     return {
         "status": "success",
-        "content": [{"json": {"approval_id": approval_id, "queued": True, "body": body}}],
+        "content": [
+            {"json": {"approval_id": approval_id, "queued": True, "body": body, "follow_up_task_id": task_id}}
+        ],
     }
