@@ -1,11 +1,12 @@
 """FastAPI app -- API + agent host.
 
-Routes (Phase 1 Day 4-5 scope):
+Routes:
   POST  /runs                      -> run_agent(), returns run_id
-  GET   /runs/{id}/events          -> SSE stream of agent_event rows
-  GET   /threads?user_id=...       -> list threads (Threads view)
+  GET   /runs                      -> list recent runs (Run Trace panel)
+  GET   /runs/{id}/events?token=.. -> SSE stream of agent_event rows
+  GET   /threads                   -> list threads (Threads view)
   GET   /threads/{id}              -> thread + messages + its deal
-  GET   /deals?user_id=...         -> list deals (pipeline table)
+  GET   /deals                     -> list deals (pipeline table)
   GET   /approvals?status=pending  -> list approvals (the signature screen)
   PATCH /approvals/{id}            -> edit a pending approval's payload
                                        (the "e" in a/r/e)
@@ -13,7 +14,7 @@ Routes (Phase 1 Day 4-5 scope):
   POST  /approvals/{id}/reject     -> reject, no side effect
   POST  /intake/{slug}             -> public, no auth -- creates thread +
                                        message, fires a run
-  GET   /clock?user_id=...         -> current virtual time for a user
+  GET   /clock                     -> current virtual time
   POST  /clock/advance             -> demo control: fast-forward + drain
                                        any tasks that become due
   POST  /clock/reset               -> demo control: back to real time
@@ -23,9 +24,15 @@ Gmail OAuth (inbound polling / send) is not wired here yet -- see
 executor.py's TODO. It needs a Google Cloud console app set up by hand
 before any code can use it.
 
-No auth on this API yet -- the Next.js frontend (apps/web) calls it
-directly with a user_id it's been given out of band (env var, no login
-flow). Fine for local/demo use; real auth is a later Phase 1/4 item.
+Auth: every route above except /intake and /health requires
+`Authorization: Bearer <supabase access token>` (see auth.py) and derives
+`user_id` from the verified token -- never from a client-supplied param.
+Every route that touches one specific resource (a thread, an approval, a
+run) also checks that resource's own user_id matches the caller, not just
+that *some* valid token was presented. The SSE route is the one
+exception to the header rule: browser EventSource can't send custom
+headers, so it takes `?token=` as a query param instead, verified the
+same way.
 
 Background: an APScheduler job polls `scheduler.tick_all_due()` every 30s
 so tasks fire in real time too, not only right after `/clock/advance`
@@ -40,13 +47,14 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import clock
 from .agent import Trigger, run_agent
+from .auth import get_current_user_id, verify_token
 from .db import get_client
 from .executor import execute_approval
 from .scheduler import tick, tick_all_due
@@ -98,17 +106,16 @@ def health() -> dict:
 
 
 class RunRequest(BaseModel):
-    user_id: str
     trigger_type: str = "manual"
     trigger_ref: str | None = None
     prompt: str
 
 
 @app.post("/runs")
-def create_run(req: RunRequest) -> dict:
+def create_run(req: RunRequest, user_id: str = Depends(get_current_user_id)) -> dict:
     run = run_agent(
         Trigger(
-            user_id=req.user_id,
+            user_id=user_id,
             trigger_type=req.trigger_type,  # type: ignore[arg-type]
             trigger_ref=req.trigger_ref,
             prompt=req.prompt,
@@ -122,15 +129,36 @@ def create_run(req: RunRequest) -> dict:
     }
 
 
+@app.get("/runs")
+def list_runs(limit: int = 30, user_id: str = Depends(get_current_user_id)) -> list[dict]:
+    res = (
+        get_client()
+        .table("agent_run")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("started_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data or []
+
+
 @app.get("/runs/{run_id}/events")
-async def stream_run_events(run_id: str):
+async def stream_run_events(run_id: str, token: str):
     """SSE stream of agent_event rows for a run, polling Postgres (no
     Supabase Realtime dependency for Phase 1 -- swap for a Realtime
-    subscription later if polling latency becomes visible)."""
+    subscription later if polling latency becomes visible). Takes
+    `?token=` rather than an Authorization header -- see module
+    docstring; browser EventSource cannot set custom headers."""
+    user_id = verify_token(token)
+    client = get_client()
+
+    run_res = client.table("agent_run").select("user_id").eq("id", run_id).maybe_single().execute()
+    if not run_res or not run_res.data or run_res.data["user_id"] != user_id:
+        raise HTTPException(404, "run not found")
 
     async def event_stream():
         seen_ids: set[str] = set()
-        client = get_client()
         # Stop once the run itself reaches a terminal status and no new
         # events have shown up for a couple of polls.
         idle_polls = 0
@@ -152,14 +180,14 @@ async def stream_run_events(run_id: str):
             else:
                 idle_polls += 1
 
-            run_res = (
+            run_status_res = (
                 client.table("agent_run")
                 .select("status")
                 .eq("id", run_id)
                 .maybe_single()
                 .execute()
             )
-            if run_res and run_res.data and run_res.data["status"] != "running":
+            if run_status_res and run_status_res.data and run_status_res.data["status"] != "running":
                 if idle_polls >= 1:
                     break
 
@@ -172,7 +200,7 @@ async def stream_run_events(run_id: str):
 
 
 @app.get("/threads")
-def list_threads(user_id: str) -> list[dict]:
+def list_threads(user_id: str = Depends(get_current_user_id)) -> list[dict]:
     res = (
         get_client()
         .table("thread")
@@ -185,10 +213,17 @@ def list_threads(user_id: str) -> list[dict]:
 
 
 @app.get("/threads/{thread_id}")
-def get_thread_detail(thread_id: str) -> dict:
+def get_thread_detail(thread_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     client = get_client()
 
-    thread_res = client.table("thread").select("*").eq("id", thread_id).maybe_single().execute()
+    thread_res = (
+        client.table("thread")
+        .select("*")
+        .eq("id", thread_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
     if not thread_res or not thread_res.data:
         raise HTTPException(404, "thread not found")
 
@@ -210,7 +245,7 @@ def get_thread_detail(thread_id: str) -> dict:
 
 
 @app.get("/deals")
-def list_deals(user_id: str) -> list[dict]:
+def list_deals(user_id: str = Depends(get_current_user_id)) -> list[dict]:
     res = (
         get_client()
         .table("deal")
@@ -226,11 +261,16 @@ def list_deals(user_id: str) -> list[dict]:
 
 
 @app.get("/approvals")
-def list_approvals(status: str = "pending", user_id: str | None = None) -> list[dict]:
-    query = get_client().table("approval").select("*").eq("status", status)
-    if user_id:
-        query = query.eq("user_id", user_id)
-    res = query.order("created_at").execute()
+def list_approvals(status: str = "pending", user_id: str = Depends(get_current_user_id)) -> list[dict]:
+    res = (
+        get_client()
+        .table("approval")
+        .select("*")
+        .eq("status", status)
+        .eq("user_id", user_id)
+        .order("created_at")
+        .execute()
+    )
     return res.data or []
 
 
@@ -238,20 +278,34 @@ class EditApprovalRequest(BaseModel):
     payload: dict[str, Any]
 
 
+def _owned_pending_approval(client, approval_id: str, user_id: str) -> dict:
+    res = (
+        client.table("approval")
+        .select("*")
+        .eq("id", approval_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise HTTPException(404, "approval not found")
+    if res.data["status"] != "pending":
+        raise HTTPException(409, f"approval is {res.data['status']}, not pending")
+    return res.data
+
+
 @app.patch("/approvals/{approval_id}")
-def edit_approval(approval_id: str, req: EditApprovalRequest) -> dict:
+def edit_approval(
+    approval_id: str, req: EditApprovalRequest, user_id: str = Depends(get_current_user_id)
+) -> dict:
     """Edit a pending approval's payload before deciding on it -- the "e"
     in the Approval Inbox's a/r/e. Only pending approvals can be edited;
     merges into the existing payload rather than replacing it wholesale,
     so callers can patch just e.g. {"body": "..."}."""
     client = get_client()
-    res = client.table("approval").select("status,payload").eq("id", approval_id).maybe_single().execute()
-    if not res or not res.data:
-        raise HTTPException(404, "approval not found")
-    if res.data["status"] != "pending":
-        raise HTTPException(409, f"approval is {res.data['status']}, not pending")
+    approval = _owned_pending_approval(client, approval_id, user_id)
 
-    merged_payload = {**res.data["payload"], **req.payload}
+    merged_payload = {**approval["payload"], **req.payload}
     updated = (
         client.table("approval")
         .update({"payload": merged_payload})
@@ -262,13 +316,9 @@ def edit_approval(approval_id: str, req: EditApprovalRequest) -> dict:
 
 
 @app.post("/approvals/{approval_id}/approve")
-def approve(approval_id: str) -> dict:
+def approve(approval_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     client = get_client()
-    res = client.table("approval").select("status").eq("id", approval_id).maybe_single().execute()
-    if not res or not res.data:
-        raise HTTPException(404, "approval not found")
-    if res.data["status"] != "pending":
-        raise HTTPException(409, f"approval is {res.data['status']}, not pending")
+    _owned_pending_approval(client, approval_id, user_id)
 
     client.table("approval").update(
         {"status": "approved", "decided_at": "now()"}
@@ -283,13 +333,9 @@ def approve(approval_id: str) -> dict:
 
 
 @app.post("/approvals/{approval_id}/reject")
-def reject(approval_id: str) -> dict:
+def reject(approval_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     client = get_client()
-    res = client.table("approval").select("status").eq("id", approval_id).maybe_single().execute()
-    if not res or not res.data:
-        raise HTTPException(404, "approval not found")
-    if res.data["status"] != "pending":
-        raise HTTPException(409, f"approval is {res.data['status']}, not pending")
+    _owned_pending_approval(client, approval_id, user_id)
 
     client.table("approval").update(
         {"status": "rejected", "decided_at": "now()"}
@@ -362,27 +408,22 @@ def intake(user_id: str, req: IntakeRequest) -> dict:
 
 
 class ClockAdvanceRequest(BaseModel):
-    user_id: str
     days: float
 
 
-class ClockUserRequest(BaseModel):
-    user_id: str
-
-
 @app.get("/clock")
-def get_clock(user_id: str) -> dict:
+def get_clock(user_id: str = Depends(get_current_user_id)) -> dict:
     return {"now": clock.now(user_id).isoformat()}
 
 
 @app.post("/clock/advance")
-def advance_clock(req: ClockAdvanceRequest) -> dict:
-    new_now = clock.advance(req.user_id, req.days)
-    fired = tick(req.user_id)
+def advance_clock(req: ClockAdvanceRequest, user_id: str = Depends(get_current_user_id)) -> dict:
+    new_now = clock.advance(user_id, req.days)
+    fired = tick(user_id)
     return {"now": new_now.isoformat(), "fired": fired}
 
 
 @app.post("/clock/reset")
-def reset_clock(req: ClockUserRequest) -> dict:
-    new_now = clock.reset(req.user_id)
+def reset_clock(user_id: str = Depends(get_current_user_id)) -> dict:
+    new_now = clock.reset(user_id)
     return {"now": new_now.isoformat()}
