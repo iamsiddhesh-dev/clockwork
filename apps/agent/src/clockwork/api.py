@@ -143,6 +143,22 @@ def list_runs(limit: int = 30, user_id: str = Depends(get_current_user_id)) -> l
     return res.data or []
 
 
+@app.get("/runs/{run_id}")
+def get_run(run_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    res = (
+        get_client()
+        .table("agent_run")
+        .select("*")
+        .eq("id", run_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise HTTPException(404, "run not found")
+    return res.data
+
+
 @app.get("/runs/{run_id}/events")
 async def stream_run_events(run_id: str, token: str):
     """SSE stream of agent_event rows for a run, polling Postgres (no

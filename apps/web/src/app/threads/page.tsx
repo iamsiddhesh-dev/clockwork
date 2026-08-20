@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { requireAccessToken } from "@/lib/supabase/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ThreadsPage() {
-  const threads = await api.listThreads().catch(() => []);
+  const accessToken = await requireAccessToken();
+  const threads = await api.listThreads(accessToken).catch(() => []);
 
   return (
     <div>

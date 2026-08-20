@@ -1,10 +1,12 @@
 import { api } from "@/lib/api";
+import { requireAccessToken } from "@/lib/supabase/session";
 import { ApprovalInbox } from "./approval-inbox";
 
 export const dynamic = "force-dynamic";
 
 export default async function ApprovalsPage() {
-  const initialApprovals = await api.listApprovals("pending").catch(() => []);
+  const accessToken = await requireAccessToken();
+  const initialApprovals = await api.listApprovals(accessToken, "pending").catch(() => []);
 
   return (
     <div>

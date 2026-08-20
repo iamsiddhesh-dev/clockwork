@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Approval } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { createClient } from "@/lib/supabase/client";
 
 const POLL_MS = 5000;
 
@@ -28,18 +29,31 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const supabase = useMemo(() => createClient(), []);
+  // Fetched fresh before every call rather than cached once -- a session
+  // open long enough for the access token to expire and silently refresh
+  // (Supabase handles the refresh; we just need to not be holding a stale
+  // copy of the old token when that happens).
+  const getToken = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) throw new Error("Not signed in");
+    return session.access_token;
+  }, [supabase]);
+
   // Don't clobber a card mid-edit out from under the user -- re-created (and
   // the interval below re-subscribed) whenever editingId flips, which just
   // resets the poll timer, not a real cost at a 5s cadence.
   const refresh = useCallback(() => {
     if (editingId !== null) return;
-    api
-      .listApprovals("pending")
+    getToken()
+      .then((token) => api.listApprovals(token, "pending"))
       .then(setApprovals)
       .catch(() => {
         /* transient poll failure -- keep showing stale data rather than blank */
       });
-  }, [editingId]);
+  }, [editingId, getToken]);
 
   useEffect(() => {
     const id = setInterval(refresh, POLL_MS);
@@ -58,7 +72,8 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
       setError(null);
       removeLocally(approval.id);
       try {
-        await api.approve(approval.id);
+        const token = await getToken();
+        await api.approve(token, approval.id);
       } catch (err) {
         setApprovals((prev) => [approval, ...prev]);
         setError(`Couldn't approve: ${(err as Error).message}`);
@@ -66,22 +81,26 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
         setBusyId(null);
       }
     },
-    [],
+    [getToken],
   );
 
-  const handleReject = useCallback(async (approval: Approval) => {
-    setBusyId(approval.id);
-    setError(null);
-    removeLocally(approval.id);
-    try {
-      await api.reject(approval.id);
-    } catch (err) {
-      setApprovals((prev) => [approval, ...prev]);
-      setError(`Couldn't reject: ${(err as Error).message}`);
-    } finally {
-      setBusyId(null);
-    }
-  }, []);
+  const handleReject = useCallback(
+    async (approval: Approval) => {
+      setBusyId(approval.id);
+      setError(null);
+      removeLocally(approval.id);
+      try {
+        const token = await getToken();
+        await api.reject(token, approval.id);
+      } catch (err) {
+        setApprovals((prev) => [approval, ...prev]);
+        setError(`Couldn't reject: ${(err as Error).message}`);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [getToken],
+  );
 
   const startEdit = (approval: Approval) => {
     setEditingId(approval.id);
@@ -91,7 +110,8 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
   const saveEdit = async (approval: Approval) => {
     setError(null);
     try {
-      const updated = await api.editApproval(approval.id, { body: draft });
+      const token = await getToken();
+      const updated = await api.editApproval(token, approval.id, { body: draft });
       setApprovals((prev) => prev.map((a) => (a.id === approval.id ? updated : a)));
     } catch (err) {
       setError(`Couldn't save edit: ${(err as Error).message}`);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { formatDate, formatNumber } from "@/lib/format";
+import { requireAccessToken } from "@/lib/supabase/session";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,8 @@ const SCORE_STYLES: Record<string, string> = {
 };
 
 export default async function DealsPage() {
-  const deals = await api.listDeals().catch(() => []);
+  const accessToken = await requireAccessToken();
+  const deals = await api.listDeals(accessToken).catch(() => []);
   const totalPipeline = deals
     .filter((d) => d.stage !== "lost")
     .reduce((sum, d) => sum + (d.estimated_value ?? 0), 0);

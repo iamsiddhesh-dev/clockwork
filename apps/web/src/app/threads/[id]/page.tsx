@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import { requireAccessToken } from "@/lib/supabase/session";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,9 @@ const SCORE_STYLES: Record<string, string> = {
 
 export default async function ThreadDetailPage(props: PageProps<"/threads/[id]">) {
   const { id } = await props.params;
+  const accessToken = await requireAccessToken();
 
-  const data = await api.getThread(id).catch(() => null);
+  const data = await api.getThread(accessToken, id).catch(() => null);
   if (!data) notFound();
 
   const { thread, messages, deal } = data;
