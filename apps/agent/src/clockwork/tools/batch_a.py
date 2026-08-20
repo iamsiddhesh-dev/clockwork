@@ -152,8 +152,11 @@ def extract_requirements(thread_id: str) -> dict:
 @tool
 def qualify_lead(deal_id: str) -> dict:
     """Score a deal hot/warm/cold with a one-sentence rationale citing the
-    actual conversation, and write the score onto the deal. Cheap
-    classification -- runs on Amazon Nova Lite, never client-visible.
+    actual conversation, and write the score onto the deal. Also fills in
+    deal.intent if it's still empty (e.g. deals created via /intake never
+    get one otherwise -- this is the tool that's actually always called,
+    unlike extract_requirements). Cheap classification -- runs on Amazon
+    Nova Lite, never client-visible.
 
     Args:
         deal_id: The deal to qualify.
@@ -180,14 +183,16 @@ def qualify_lead(deal_id: str) -> dict:
     )
     score: LeadScore = result.structured_output
 
-    client.table("deal").update(
-        {
-            "score": score.score,
-            "score_rationale": score.rationale,
-            "estimated_value": score.estimated_value,
-            "stage": "qualified" if deal["stage"] == "new" else deal["stage"],
-        }
-    ).eq("id", deal_id).eq("user_id", user_id).execute()
+    update = {
+        "score": score.score,
+        "score_rationale": score.rationale,
+        "estimated_value": score.estimated_value,
+        "stage": "qualified" if deal["stage"] == "new" else deal["stage"],
+    }
+    if not deal.get("intent"):
+        update["intent"] = score.intent
+
+    client.table("deal").update(update).eq("id", deal_id).eq("user_id", user_id).execute()
 
     return {"status": "success", "content": [{"json": score.model_dump()}]}
 

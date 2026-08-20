@@ -18,9 +18,40 @@ Two callers:
 
 from datetime import datetime
 
+from litellm.exceptions import RateLimitError
+
 from .agent import Trigger, run_agent
 from .clock import now as clock_now
 from .db import get_client
+
+# How many times a task gets requeued after a rate-limit failure before
+# giving up for good. Deliberately not unbounded -- if it's still hitting
+# 429s after this many tries, something structural is wrong (not just a
+# transient TPM blip), and it should surface as `failed` rather than
+# retry forever.
+MAX_TASK_ATTEMPTS = 5
+
+
+def _root_rate_limit_error(exc: BaseException) -> RateLimitError | None:
+    """Find a RateLimitError anywhere in `exc`'s cause chain, if there is
+    one. run_agent() doesn't raise litellm's RateLimitError directly --
+    Strands wraps it in EventLoopException (.original_exception, not a
+    subclass -- confirmed by reading strands.types.exceptions, a plain
+    `except RateLimitError` here would silently never match). Also checks
+    the standard `__cause__`/`__context__` chain in case another wrapper
+    is introduced somewhere along the way."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, RateLimitError):
+            return current
+        original = getattr(current, "original_exception", None)
+        if isinstance(original, BaseException):
+            current = original
+            continue
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _pending_tasks() -> list[dict]:
@@ -125,6 +156,37 @@ def _run_task(task: dict) -> dict:
             "outcome": run.outcome,
         }
     except Exception as exc:
+        rate_limit_exc = _root_rate_limit_error(exc)
+        if rate_limit_exc is not None:
+            # Requeue rather than fail outright -- this is the same
+            # transient TPM blip that's hit repeatedly in testing, and
+            # manually resetting a failed task back to 'pending' recovered
+            # cleanly every time. Automating exactly that recovery is safe
+            # *here* in a way it wouldn't be for the interactive
+            # orchestrator call: a partially completed run could in theory
+            # re-run draft_reply on retry and duplicate an approval card,
+            # but nothing sends without a human clicking approve regardless
+            # -- worst case is a human sees two near-identical drafts and
+            # rejects one, not a duplicate send. Capped so a persistently
+            # throttled account still surfaces as failed instead of
+            # retrying forever.
+            current_attempts = task["attempts"] + 1
+            if current_attempts < MAX_TASK_ATTEMPTS:
+                client.table("task").update({"status": "pending"}).eq("id", task_id).execute()
+                return {
+                    "task_id": task_id,
+                    "kind": task["kind"],
+                    "requeued": True,
+                    "attempts": current_attempts,
+                    "error": str(rate_limit_exc),
+                }
+            client.table("task").update({"status": "failed"}).eq("id", task_id).execute()
+            return {
+                "task_id": task_id,
+                "kind": task["kind"],
+                "error": f"gave up after {current_attempts} attempts: {rate_limit_exc}",
+            }
+
         client.table("task").update({"status": "failed"}).eq("id", task_id).execute()
         return {"task_id": task_id, "kind": task["kind"], "error": str(exc)}
 

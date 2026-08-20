@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class LeadScore(BaseModel):
     """How well this inbound message matches the freelancer's practice."""
 
+    intent: str = Field(description="One short phrase for what the client wants, e.g. 'Stripe subscription billing migration'")
     score: Literal["hot", "warm", "cold"]
     rationale: str = Field(description="One sentence, citing specifics from the message")
     estimated_value: float | None = Field(
