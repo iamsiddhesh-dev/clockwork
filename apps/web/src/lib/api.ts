@@ -60,6 +60,24 @@ export type Deal = {
   updated_at: string;
 };
 
+export type PortfolioItem = {
+  title: string;
+  summary: string;
+  tags?: string[];
+};
+
+export type Profile = {
+  id?: string;
+  user_id?: string;
+  name: string;
+  skills: string[];
+  rates: { hourly?: number; currency?: string; [key: string]: unknown };
+  positioning: string | null;
+  voice_samples: string[];
+  portfolio: PortfolioItem[];
+  payment_terms: string | null;
+};
+
 export type AgentRun = {
   id: string;
   user_id: string;
@@ -127,6 +145,11 @@ export const api = {
     }),
 
   listDeals: (accessToken: string) => apiFetch<Deal[]>(`/deals`, accessToken, { cache: "no-store" }),
+
+  getProfile: (accessToken: string) =>
+    apiFetch<Profile | null>(`/profile`, accessToken, { cache: "no-store" }),
+  saveProfile: (accessToken: string, profile: Omit<Profile, "id" | "user_id">) =>
+    apiFetch<Profile>(`/profile`, accessToken, { method: "PUT", body: JSON.stringify(profile) }),
 
   listRuns: (accessToken: string, limit = 30) =>
     apiFetch<AgentRun[]>(`/runs?limit=${limit}`, accessToken, { cache: "no-store" }),

@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/threads", label: "Threads" },
   { href: "/deals", label: "Deals" },
   { href: "/runs", label: "Run Trace" },
+  { href: "/profile", label: "Profile" },
 ];
 
 export function Nav() {

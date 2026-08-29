@@ -257,6 +257,56 @@ def get_thread_detail(thread_id: str, user_id: str = Depends(get_current_user_id
     }
 
 
+# ── profile ─────────────────────────────────────────────────────────────
+#
+# Load-bearing, not settings-page filler: `recall` grounds every drafted
+# reply in this, and score_fit ranks sourced opportunities against it. An
+# empty profile means the agent has no voice to imitate and nothing to
+# measure a lead against.
+
+
+class ProfileBody(BaseModel):
+    name: str
+    skills: list[str] = []
+    rates: dict[str, Any] = {}
+    positioning: str | None = None
+    voice_samples: list[str] = []
+    portfolio: list[dict[str, Any]] = []
+    payment_terms: str | None = None
+
+
+@app.get("/profile")
+def get_profile(user_id: str = Depends(get_current_user_id)) -> dict | None:
+    res = (
+        get_client().table("profile").select("*").eq("user_id", user_id).maybe_single().execute()
+    )
+    return res.data if res else None
+
+
+@app.put("/profile")
+def put_profile(body: ProfileBody, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Create or update the caller's profile. Upsert rather than separate
+    POST/PUT -- there is exactly one profile per user, and the caller
+    shouldn't have to know whether it exists yet."""
+    client = get_client()
+    payload = body.model_dump()
+
+    existing = (
+        client.table("profile").select("id").eq("user_id", user_id).maybe_single().execute()
+    )
+    if existing and existing.data:
+        res = (
+            client.table("profile")
+            .update({**payload, "updated_at": "now()"})
+            .eq("user_id", user_id)
+            .execute()
+        )
+    else:
+        res = client.table("profile").insert({**payload, "user_id": user_id}).execute()
+
+    return res.data[0]
+
+
 # ── deals ───────────────────────────────────────────────────────────────
 
 
