@@ -55,9 +55,12 @@ from pydantic import BaseModel
 from . import clock
 from .agent import Trigger, run_agent
 from .auth import get_current_user_id, verify_token
+from .context import run_context
 from .db import get_client
 from .executor import execute_approval
 from .scheduler import tick, tick_all_due
+from .sources import ensure_sources, sync_sources
+from .tools.sourcing import ProfileMissingError, score_unscored
 
 logger = logging.getLogger("clockwork.scheduler")
 
@@ -304,6 +307,77 @@ def put_profile(body: ProfileBody, user_id: str = Depends(get_current_user_id)) 
     else:
         res = client.table("profile").insert({**payload, "user_id": user_id}).execute()
 
+    return res.data[0]
+
+
+# ── opportunities (outbound sourcing) ───────────────────────────────────
+
+
+@app.get("/opportunities")
+def list_opportunities(
+    status: str | None = None,
+    limit: int = 100,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    """Best fit first. Unscored rows sort last rather than being hidden --
+    "not scored yet" is a real state the screen needs to show."""
+    query = get_client().table("opportunity").select("*").eq("user_id", user_id)
+    if status:
+        query = query.eq("status", status)
+    res = (
+        query.order("fit_score", desc=True, nullsfirst=False)
+        .order("posted_at", desc=True, nullsfirst=False)
+        .limit(limit)
+        .execute()
+    )
+    return res.data or []
+
+
+@app.get("/sources")
+def list_sources(user_id: str = Depends(get_current_user_id)) -> list[dict]:
+    return ensure_sources(user_id)
+
+
+@app.post("/opportunities/sync")
+def sync_opportunities(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Pull every enabled feed and cache the results. Per-source result is
+    returned so a feed that errored is visible rather than silently
+    looking like 'no new leads'."""
+    with run_context(user_id=user_id, run_id=None):
+        return sync_sources(user_id)
+
+
+class ScoreRequest(BaseModel):
+    limit: int = 10
+
+
+@app.post("/opportunities/score")
+def score_opportunities(
+    req: ScoreRequest, user_id: str = Depends(get_current_user_id)
+) -> dict:
+    """Score a batch of unscored opportunities against the caller's
+    profile. Batched on purpose -- see score_unscored's docstring."""
+    with run_context(user_id=user_id, run_id=None):
+        try:
+            return score_unscored(limit=req.limit)
+        except ProfileMissingError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/opportunities/{opportunity_id}/dismiss")
+def dismiss_opportunity(
+    opportunity_id: str, user_id: str = Depends(get_current_user_id)
+) -> dict:
+    res = (
+        get_client()
+        .table("opportunity")
+        .update({"status": "dismissed", "updated_at": "now()"})
+        .eq("id", opportunity_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(404, "opportunity not found")
     return res.data[0]
 
 

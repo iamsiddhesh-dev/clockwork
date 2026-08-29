@@ -78,6 +78,39 @@ export type Profile = {
   payment_terms: string | null;
 };
 
+export type Opportunity = {
+  id: string;
+  user_id: string;
+  source_id: string | null;
+  external_id: string;
+  title: string | null;
+  body: string | null;
+  url: string | null;
+  author: string | null;
+  posted_at: string | null;
+  fit_score: number | null;
+  fit_rationale: string | null;
+  fit_evidence: { evidence?: string[]; concerns?: string[] } | null;
+  status: "new" | "scored" | "pitched" | "dismissed" | "converted";
+  deal_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Source = {
+  id: string;
+  kind: string;
+  name: string;
+  enabled: boolean;
+  last_fetched_at: string | null;
+  last_error: string | null;
+};
+
+export type SyncReport = {
+  total: number;
+  sources: { kind: string; ok: boolean; fetched?: number; error?: string }[];
+};
+
 export type AgentRun = {
   id: string;
   user_id: string;
@@ -145,6 +178,20 @@ export const api = {
     }),
 
   listDeals: (accessToken: string) => apiFetch<Deal[]>(`/deals`, accessToken, { cache: "no-store" }),
+
+  listOpportunities: (accessToken: string) =>
+    apiFetch<Opportunity[]>(`/opportunities`, accessToken, { cache: "no-store" }),
+  listSources: (accessToken: string) =>
+    apiFetch<Source[]>(`/sources`, accessToken, { cache: "no-store" }),
+  syncOpportunities: (accessToken: string) =>
+    apiFetch<SyncReport>(`/opportunities/sync`, accessToken, { method: "POST" }),
+  scoreOpportunities: (accessToken: string, limit = 10) =>
+    apiFetch<{ scored: number; failed: number }>(`/opportunities/score`, accessToken, {
+      method: "POST",
+      body: JSON.stringify({ limit }),
+    }),
+  dismissOpportunity: (accessToken: string, id: string) =>
+    apiFetch<Opportunity>(`/opportunities/${id}/dismiss`, accessToken, { method: "POST" }),
 
   getProfile: (accessToken: string) =>
     apiFetch<Profile | null>(`/profile`, accessToken, { cache: "no-store" }),

@@ -12,6 +12,7 @@ from .batch_a import (
     recall,
 )
 from .scheduling import schedule_task
+from .sourcing import score_fit
 
 ALL_TOOLS = [
     recall,
@@ -21,6 +22,7 @@ ALL_TOOLS = [
     qualify_lead,
     draft_reply,
     schedule_task,
+    score_fit,
 ]
 
 __all__ = ["ALL_TOOLS", "create_approval"]

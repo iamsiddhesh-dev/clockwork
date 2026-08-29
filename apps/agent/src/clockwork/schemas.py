@@ -21,6 +21,27 @@ class LeadScore(BaseModel):
     )
 
 
+class FitScore(BaseModel):
+    """How well a sourced opportunity matches this freelancer's practice."""
+
+    score: int = Field(
+        description="0-100. How well this matches the freelancer's skills, positioning and rate. "
+        "Be harsh: 80+ means they should pitch today, under 30 means don't bother."
+    )
+    rationale: str = Field(
+        description="One or two sentences. Cite specifics from BOTH the posting and the profile."
+    )
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="Concrete facts from the freelancer's own profile that justify the score "
+        "-- named skills or portfolio case studies, not vague praise.",
+    )
+    concerns: list[str] = Field(
+        default_factory=list,
+        description="Reasons this might not suit them: wrong stack, likely full-time, rate mismatch.",
+    )
+
+
 class ExtractedRequirements(BaseModel):
     """What the client actually wants, pulled from the thread."""
 

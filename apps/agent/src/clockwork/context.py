@@ -15,7 +15,10 @@ _run_id: ContextVar[str | None] = ContextVar("clockwork_run_id", default=None)
 
 
 @contextmanager
-def run_context(*, user_id: str, run_id: str):
+def run_context(*, user_id: str, run_id: str | None):
+    # run_id is optional: work triggered directly by the user (syncing
+    # sources, scoring a batch) needs the user context so tools and the
+    # ledger work, but isn't an agent_run and has nothing to attribute to.
     user_token = _user_id.set(user_id)
     run_token = _run_id.set(run_id)
     try:

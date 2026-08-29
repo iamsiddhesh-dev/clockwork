@@ -8,6 +8,7 @@ import { ClockControl } from "./clock-control";
 
 const LINKS = [
   { href: "/approvals", label: "Approval Inbox" },
+  { href: "/opportunities", label: "Opportunities" },
   { href: "/threads", label: "Threads" },
   { href: "/deals", label: "Deals" },
   { href: "/runs", label: "Run Trace" },
