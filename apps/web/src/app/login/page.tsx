@@ -12,6 +12,11 @@ function LoginForm() {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
+  // /auth/callback redirects back here with ?error= when an exchange
+  // fails (expired link, or the link was opened in a different browser
+  // than it was requested from -- see that route's PKCE note).
+  const callbackError = searchParams.get("error");
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus("sending");
@@ -40,9 +45,21 @@ function LoginForm() {
         Sign in with a magic link -- no password.
       </p>
 
+      {callbackError && status === "idle" && (
+        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          {callbackError}
+        </div>
+      )}
+
       {status === "sent" ? (
         <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-          Check <strong>{email}</strong> for a sign-in link.
+          <p>
+            Check <strong>{email}</strong> for a sign-in link.
+          </p>
+          <p className="mt-2 text-xs opacity-80">
+            Open it in <strong>this same browser</strong> -- the link is tied to this session, so
+            opening it on another device or browser won&rsquo;t work.
+          </p>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-3">

@@ -35,7 +35,8 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isPublicPath = pathname.startsWith("/login") || pathname.startsWith("/auth/callback");
+  // /auth/* never reaches here -- it's excluded in the matcher below.
+  const isPublicPath = pathname.startsWith("/login");
 
   if (!user && !isPublicPath) {
     const loginUrl = new URL("/login", request.url);
@@ -54,6 +55,16 @@ export const config = {
     // couple of Next.js defaults -- caught a real instance of this
     // exact gap while testing: a plain .txt file under public/ was
     // getting redirected to /login instead of served.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|pdf|woff2?|css|js|map)$).*)",
+    //
+    // `auth` is excluded deliberately, not for convenience: this proxy
+    // calls getUser() on every matched request, and on a request with no
+    // session yet supabase-js can clear auth cookies -- which on
+    // /auth/callback means wiping the PKCE code_verifier microseconds
+    // before the exchange needs to read it. The callback route manages
+    // its own cookies; the proxy has nothing to add there and can only
+    // do harm.
+    // `auth/` with the slash, not bare `auth`, so a future route that
+    // merely starts with those letters isn't silently unprotected.
+    "/((?!auth/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|pdf|woff2?|css|js|map)$).*)",
   ],
 };
