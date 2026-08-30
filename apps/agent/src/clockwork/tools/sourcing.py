@@ -11,6 +11,8 @@ portfolio there is nothing to measure a posting against, and this
 returns a hard failure rather than inventing a plausible number.
 """
 
+import time
+
 from strands import tool
 
 from ..context import current_user_id
@@ -20,9 +22,18 @@ from ..models import Role
 from ..schemas import FitScore
 
 # Postings run long (a full job description). The signal for "does this
-# suit me" is near the top, and the extractor is on an 8k TPM budget --
-# see models.py's note on the Groq rate-limit split.
-MAX_BODY_CHARS = 1500
+# suit me" -- role, stack, contract-vs-salaried -- is near the top, and
+# the extractor is on an 8k TPM budget (see models.py's note on the Groq
+# rate-limit split). Measured: at 1500 chars a batch of 8 lost 2 to rate
+# limiting; trimming buys roughly a third more scores per minute at no
+# observed cost to score quality.
+MAX_BODY_CHARS = 900
+
+# Groq's free tier allows ~8k tokens/min on the extractor model and each
+# score costs roughly 600-800. Firing a batch flat out reliably tripped
+# the limit partway through; pacing trades a slower batch for one that
+# actually finishes.
+SECONDS_BETWEEN_SCORES = 5.0
 
 
 class ProfileMissingError(RuntimeError):
@@ -130,13 +141,17 @@ def score_unscored(limit: int = 10) -> dict:
         .execute()
     )
 
+    rows = pending.data or []
     scored, failed = [], []
-    for row in pending.data or []:
+    for i, row in enumerate(rows):
+        if i:
+            time.sleep(SECONDS_BETWEEN_SCORES)
         try:
             scored.append(score_opportunity(row["id"], profile=profile))
         except Exception as exc:
-            # Usually a rate limit -- record and keep going so a partial
-            # batch still lands rather than losing the whole run.
+            # Usually a rate limit or a transient malformed tool call --
+            # record and keep going so a partial batch still lands rather
+            # than losing the whole run.
             failed.append({"opportunity_id": row["id"], "error": str(exc)[:200]})
 
     return {"scored": len(scored), "failed": len(failed), "results": scored, "errors": failed}

@@ -120,6 +120,48 @@ def record_usage(
     return cost
 
 
+class StructuredOutputError(RuntimeError):
+    """The model didn't return output matching the requested schema."""
+
+
+def _validated_structured_output(result: AgentResult, model_cls: type[BaseModel]) -> BaseModel:
+    """Guarantee `result.structured_output` really is an instance of the
+    requested schema.
+
+    Strands does not always hand back a validated instance: an
+    intermittent Groq `tool_use_failed` (the model emits a tool call that
+    doesn't match the schema) surfaced here as an object whose supposedly
+    `int` field held the string 'tool_use_failed', which then blew up far
+    away in caller code as a baffling `int()` error. Every caller passing
+    `structured_output_model` goes through this, so qualify_lead and
+    extract_requirements get the same protection score_fit needed --
+    and the failure now names what actually went wrong.
+    """
+    raw = result.structured_output
+    if isinstance(raw, model_cls):
+        return raw
+    if isinstance(raw, dict):
+        try:
+            return model_cls.model_validate(raw)
+        except Exception as exc:
+            raise StructuredOutputError(
+                f"model returned a dict that isn't a valid {model_cls.__name__}: {exc}"
+            ) from exc
+    if raw is None:
+        raise StructuredOutputError(
+            f"model returned no structured output for {model_cls.__name__} "
+            "(usually a transient tool-call failure -- retrying is reasonable)"
+        )
+    # Last resort: something schema-shaped but unvalidated.
+    try:
+        return model_cls.model_validate(raw, from_attributes=True)
+    except Exception as exc:
+        raise StructuredOutputError(
+            f"model returned {type(raw).__name__} that isn't a valid "
+            f"{model_cls.__name__}: {exc}"
+        ) from exc
+
+
 def invoke_model(
     role: Role,
     prompt: str,
@@ -145,5 +187,12 @@ def invoke_model(
     result = call_with_retry(
         lambda: agent(prompt, structured_output_model=structured_output_model)
     )
+    # Record usage before validating: the tokens were spent whether or not
+    # the model gave us something usable, and the ledger should say so.
     record_usage(user_id=user_id, run_id=run_id, role=resolved_role, result=result)
+
+    if structured_output_model is not None:
+        result.structured_output = _validated_structured_output(
+            result, structured_output_model
+        )
     return result

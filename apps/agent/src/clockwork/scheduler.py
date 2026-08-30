@@ -18,11 +18,13 @@ Two callers:
 
 from datetime import datetime
 
-from litellm.exceptions import RateLimitError
-
 from .agent import Trigger, run_agent
 from .clock import now as clock_now
 from .db import get_client
+# Shared with the retry helper on purpose: both need to see through
+# Strands' EventLoopException wrapper, and two copies of that logic is
+# exactly how one of them silently rots.
+from .retry import root_rate_limit_error
 
 # How many times a task gets requeued after a rate-limit failure before
 # giving up for good. Deliberately not unbounded -- if it's still hitting
@@ -30,28 +32,6 @@ from .db import get_client
 # transient TPM blip), and it should surface as `failed` rather than
 # retry forever.
 MAX_TASK_ATTEMPTS = 5
-
-
-def _root_rate_limit_error(exc: BaseException) -> RateLimitError | None:
-    """Find a RateLimitError anywhere in `exc`'s cause chain, if there is
-    one. run_agent() doesn't raise litellm's RateLimitError directly --
-    Strands wraps it in EventLoopException (.original_exception, not a
-    subclass -- confirmed by reading strands.types.exceptions, a plain
-    `except RateLimitError` here would silently never match). Also checks
-    the standard `__cause__`/`__context__` chain in case another wrapper
-    is introduced somewhere along the way."""
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, RateLimitError):
-            return current
-        original = getattr(current, "original_exception", None)
-        if isinstance(original, BaseException):
-            current = original
-            continue
-        current = current.__cause__ or current.__context__
-    return None
 
 
 def _pending_tasks() -> list[dict]:
@@ -156,7 +136,7 @@ def _run_task(task: dict) -> dict:
             "outcome": run.outcome,
         }
     except Exception as exc:
-        rate_limit_exc = _root_rate_limit_error(exc)
+        rate_limit_exc = root_rate_limit_error(exc)
         if rate_limit_exc is not None:
             # Requeue rather than fail outright -- this is the same
             # transient TPM blip that's hit repeatedly in testing, and
