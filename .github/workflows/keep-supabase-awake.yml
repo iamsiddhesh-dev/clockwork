@@ -1,0 +1,62 @@
+name: Keep Supabase awake
+
+# Supabase free-tier projects auto-pause after 7 days of inactivity, and a
+# paused project loses its DNS record entirely -- the hostname stops
+# resolving, so the whole app (auth included) is simply gone. That already
+# happened once here after 11 quiet days.
+#
+# The risk this guards against is specifically judging: submissions land
+# days before anyone evaluates them, and a reviewer opening a dead demo
+# link has no way to know it worked yesterday. This pings the REST API
+# often enough to keep the project counted as active.
+#
+# The anon key is safe to expose by design (it grants nothing on its own;
+# RLS and auth gate every table), but it is read from a repository secret
+# anyway so rotating it never means editing this file.
+
+on:
+  schedule:
+    # Every 3 days -- comfortably inside the 7-day window even if GitHub
+    # delays a scheduled run, which it does under load.
+    - cron: "0 6 */3 * *"
+  workflow_dispatch: # so it can be triggered by hand before a demo
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST endpoint
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_ANON_KEY repository secrets are not set."
+            exit 1
+          fi
+
+          # Verified against the live project: this returns HTTP 401 with
+          # Postgres error 42501, because the anon role has no grants (the
+          # frontend never talks to Supabase directly for app data -- it
+          # goes through FastAPI with the service role). That 42501 is a
+          # *Postgres* error code, which is the point: it proves PostgREST
+          # reached the database and the database answered. That is the
+          # activity the pause timer watches, and it happens without the
+          # workflow holding a powerful key or reading anyone's data.
+          status=$(curl -s -o /tmp/body.txt -w "%{http_code}" \
+            --max-time 30 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/profile?select=id&limit=0")
+
+          echo "HTTP $status"
+          # 200 (empty array) and 401/403 (permissions refusing) all prove
+          # the project is awake and serving. Only a transport failure
+          # (000 -- which is what a paused project looks like, since its
+          # DNS record disappears) or a 5xx means it is actually down.
+          if [ "$status" = "000" ] || [ "$status" -ge 500 ]; then
+            echo "::error::Supabase unreachable (HTTP $status) -- the project may be paused."
+            cat /tmp/body.txt
+            exit 1
+          fi
+          echo "Supabase is awake."

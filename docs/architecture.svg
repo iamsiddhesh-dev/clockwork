@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 660" width="1020" height="660" role="img" aria-label="Clockwork architecture. Two triggers — a public intake form and a time-based scheduler polling every 30 seconds — both call the single run_agent entry point. run_agent builds a Strands agent whose model comes from a swappable router: Bedrock, currently blocked by an AWS account hold, or Groq, live. The agent calls nine typed tools that read and write Supabase Postgres; source adapters for Hacker News, Remotive and RemoteOK populate the opportunity table. Strands lifecycle hooks write every tool call and its cost to the agent_event audit trail. Approval-gated tools cannot send: they write a pending approval row, a human approves it in the Approval Inbox, and only then does the executor perform the real side effect.">
+  <style>
+    .bg    { fill: #ffffff; }
+    .box   { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
+    .box-accent { fill: #fff8e6; stroke: #d4a72c; stroke-width: 2; }
+    .box-live   { fill: #eaf6ec; stroke: #4a9a5e; stroke-width: 2; }
+    .box-dead   { fill: #f6f8fa; stroke: #b0b7be; stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .box-gate   { fill: #fdf0ee; stroke: #c4664d; stroke-width: 2; }
+    .t       { fill: #1f2328; font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .title   { font-size: 14px; font-weight: 600; }
+    .sub     { font-size: 11px; fill: #59636e; }
+    .tiny    { font-size: 10px; fill: #59636e; }
+    .lbl     { font-size: 10.5px; fill: #59636e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .hdr     { font-size: 11px; font-weight: 700; fill: #59636e; letter-spacing: .08em; }
+    .line    { stroke: #8c959f; stroke-width: 1.6; fill: none; }
+    .line-gate { stroke: #c4664d; stroke-width: 2; fill: none; }
+    .line-dead { stroke: #b0b7be; stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+    .dead-t  { fill: #8c959f; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg    { fill: #0d1117; }
+      .box   { fill: #161b22; stroke: #30363d; }
+      .box-accent { fill: #2b2413; stroke: #d4a72c; }
+      .box-live   { fill: #12261a; stroke: #4a9a5e; }
+      .box-dead   { fill: #161b22; stroke: #484f58; }
+      .box-gate   { fill: #2b1a16; stroke: #c4664d; }
+      .t     { fill: #e6edf3; }
+      .sub, .tiny, .lbl, .hdr { fill: #8b949e; }
+      .line  { stroke: #6e7681; }
+      .line-dead { stroke: #484f58; }
+      .dead-t { fill: #6e7681; }
+    }
+  </style>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8c959f"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c4664d"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1020" height="660"/>
+
+  <!-- ===== TRIGGERS ===== -->
+  <text class="t hdr" x="20" y="30">TRIGGERS</text>
+
+  <g>
+    <rect class="box" x="20" y="44" width="170" height="54" rx="6"/>
+    <text class="t title" x="34" y="66">Public intake</text>
+    <text class="t sub" x="34" y="84">POST /intake — a lead arrives</text>
+  </g>
+
+  <g>
+    <rect class="box-accent" x="20" y="116" width="170" height="60" rx="6"/>
+    <text class="t title" x="34" y="138">Scheduler tick</text>
+    <text class="t sub" x="34" y="155">every 30s, no human present</text>
+    <text class="t sub" x="34" y="169">drains tasks that are due</text>
+  </g>
+
+  <text class="t tiny" x="20" y="196">Both wake the agent the same way →</text>
+
+  <!-- ===== SINGLE ENTRY POINT ===== -->
+  <path class="line" d="M190 71 L 228 71 L 228 155"/>
+  <path class="line" d="M190 146 L 228 146 L 228 155"/>
+  <path class="line" d="M228 155 L 242 155" marker-end="url(#a)"/>
+
+  <g>
+    <rect class="box" x="246" y="120" width="164" height="70" rx="6"/>
+    <text class="t title" x="328" y="148" text-anchor="middle">run_agent()</text>
+    <text class="t sub" x="328" y="166" text-anchor="middle">the single entry point</text>
+    <text class="t sub" x="328" y="180" text-anchor="middle">opens agent_run</text>
+  </g>
+
+  <!-- ===== STRANDS AGENT ===== -->
+  <path class="line" d="M410 155 L 462 155" marker-end="url(#a)"/>
+
+  <g>
+    <rect class="box" x="466" y="112" width="200" height="86" rx="6"/>
+    <text class="t title" x="566" y="136" text-anchor="middle">Strands Agent</text>
+    <text class="t sub" x="566" y="155" text-anchor="middle">9 typed @tools</text>
+    <text class="t sub" x="566" y="170" text-anchor="middle">Pydantic structured output</text>
+    <text class="t sub" x="566" y="185" text-anchor="middle">lifecycle hooks</text>
+  </g>
+
+  <!-- ===== MODEL ROUTER ===== -->
+  <text class="t hdr" x="466" y="238">MODEL ROUTER — one .env line</text>
+  <path class="line" d="M566 198 L 566 250" marker-end="url(#a)"/>
+
+  <g>
+    <rect class="box-dead" x="466" y="256" width="200" height="48" rx="6"/>
+    <text class="t title dead-t" x="480" y="277">Bedrock · Claude Sonnet 5</text>
+    <text class="t sub" x="480" y="293">blocked — AWS account hold</text>
+  </g>
+
+  <g>
+    <rect class="box-live" x="466" y="314" width="200" height="48" rx="6"/>
+    <text class="t title" x="480" y="335">Groq · gpt-oss-120b / 20b</text>
+    <text class="t sub" x="480" y="351">live — via Strands LiteLLM</text>
+  </g>
+
+  <text class="t tiny" x="466" y="382">Every tool, hook and schema sits above this line, untouched by the swap.</text>
+
+  <!-- ===== DATA ===== -->
+  <path class="line" d="M666 155 L 726 155" marker-end="url(#a)"/>
+
+  <g>
+    <rect class="box" x="730" y="112" width="270" height="86" rx="6"/>
+    <text class="t title" x="744" y="136">Supabase Postgres</text>
+    <text class="t sub" x="744" y="155">profile · thread · message · deal</text>
+    <text class="t sub" x="744" y="170">opportunity · approval · task</text>
+    <text class="t sub" x="744" y="185">RLS on user_id; JWT verified per request</text>
+  </g>
+
+  <!-- audit trail -->
+  <path class="line" d="M865 198 L 865 244" marker-end="url(#a)"/>
+  <text class="t lbl" x="872" y="224">hooks log</text>
+
+  <g>
+    <rect class="box" x="730" y="250" width="270" height="60" rx="6"/>
+    <text class="t title" x="744" y="272">agent_event · token_ledger</text>
+    <text class="t sub" x="744" y="290">every tool call, latency, tokens, cost</text>
+    <text class="t sub" x="744" y="303">replayed live over SSE in Run Trace</text>
+  </g>
+
+  <!-- ===== SOURCES ===== -->
+  <text class="t hdr" x="20" y="252">SOURCE ADAPTERS</text>
+  <g>
+    <rect class="box" x="20" y="264" width="170" height="76" rx="6"/>
+    <text class="t sub" x="34" y="286">Hacker News</text>
+    <text class="t sub" x="34" y="304">Remotive</text>
+    <text class="t sub" x="34" y="322">RemoteOK</text>
+  </g>
+  <text class="t tiny" x="20" y="358">public, no keys, cached raw</text>
+  <path class="line" d="M190 302 L 440 302 L 440 175 L 462 175" marker-end="url(#a)"/>
+  <text class="t lbl" x="198" y="294">→ opportunity rows</text>
+
+  <!-- ===== APPROVAL GATE ===== -->
+  <line class="line-dead" x1="20" y1="424" x2="1000" y2="424"/>
+  <text class="t hdr" x="20" y="452">THE APPROVAL GATE — enforced in code, not prompting</text>
+
+  <g>
+    <rect class="box-gate" x="20" y="470" width="196" height="70" rx="6"/>
+    <text class="t title" x="34" y="493">draft_reply / draft_pitch</text>
+    <text class="t sub" x="34" y="511">writes text, cannot send</text>
+    <text class="t sub" x="34" y="526">returns "queued"</text>
+  </g>
+
+  <path class="line-gate" d="M216 505 L 262 505" marker-end="url(#ag)"/>
+
+  <g>
+    <rect class="box-gate" x="266" y="470" width="180" height="70" rx="6"/>
+    <text class="t title" x="280" y="493">approval row</text>
+    <text class="t sub" x="280" y="511">status: pending</text>
+    <text class="t sub" x="280" y="526">what · why · read · changes</text>
+  </g>
+
+  <path class="line-gate" d="M446 505 L 492 505" marker-end="url(#ag)"/>
+
+  <g>
+    <rect class="box-accent" x="496" y="470" width="180" height="70" rx="6"/>
+    <text class="t title" x="510" y="493">You</text>
+    <text class="t sub" x="510" y="511">Approval Inbox</text>
+    <text class="t sub" x="510" y="526">approve / reject / edit</text>
+  </g>
+
+  <path class="line-gate" d="M676 505 L 722 505" marker-end="url(#ag)"/>
+  <text class="t lbl" x="701" y="558" text-anchor="middle">only on approve</text>
+
+  <g>
+    <rect class="box" x="726" y="470" width="274" height="70" rx="6"/>
+    <text class="t title" x="740" y="493">executor.py</text>
+    <text class="t sub" x="740" y="511">performs the real side effect</text>
+    <text class="t sub" x="740" y="526">creates thread + deal, schedules follow-up</text>
+  </g>
+
+  <text class="t tiny" x="20" y="574">An approval-gated tool has no code path that sends. Asking a model not to send things is not a safety model.</text>
+
+  <!-- ===== VIRTUAL CLOCK ===== -->
+  <line class="line-dead" x1="20" y1="598" x2="1000" y2="598"/>
+  <text class="t hdr" x="20" y="626">VIRTUAL CLOCK</text>
+  <text class="t sub" x="132" y="626">every time read goes through clock.now() — advance it days ahead and watch the follow-up ladder fire in seconds</text>
+</svg>
