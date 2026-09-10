@@ -11,6 +11,7 @@ from .batch_a import (
     qualify_lead,
     recall,
 )
+from .pitching import draft_pitch
 from .scheduling import schedule_task
 from .sourcing import score_fit
 
@@ -23,6 +24,7 @@ ALL_TOOLS = [
     draft_reply,
     schedule_task,
     score_fit,
+    draft_pitch,
 ]
 
 __all__ = ["ALL_TOOLS", "create_approval"]

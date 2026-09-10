@@ -60,6 +60,7 @@ from .db import get_client
 from .executor import execute_approval
 from .scheduler import tick, tick_all_due
 from .sources import ensure_sources, sync_sources
+from .tools.pitching import draft_pitch_for
 from .tools.sourcing import ProfileMissingError, score_unscored
 
 logger = logging.getLogger("clockwork.scheduler")
@@ -362,6 +363,81 @@ def score_opportunities(
             return score_unscored(limit=req.limit)
         except ProfileMissingError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/opportunities/{opportunity_id}/pitch")
+def pitch_opportunity(
+    opportunity_id: str, user_id: str = Depends(get_current_user_id)
+) -> dict:
+    """Draft outbound outreach for one opportunity. Queues an approval --
+    nothing is sent here."""
+    with run_context(user_id=user_id, run_id=None):
+        try:
+            return draft_pitch_for(opportunity_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+class KickoffRequest(BaseModel):
+    score_limit: int = 6
+    pitch_top: int = 1
+
+
+@app.post("/kickoff")
+def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Everything a freshly-onboarded user should get without asking:
+    pull the feeds, score what came back against their new profile, and
+    draft a pitch for the best match.
+
+    Deliberately one call rather than making someone press three buttons
+    in order -- the product claim is an agent that does the work, and a
+    first run that ends in "here is outreach ready to send" demonstrates
+    that in a way a list of jobs behind two buttons does not.
+
+    Each stage degrades independently: sourcing can succeed while scoring
+    is rate-limited, and the response says exactly what happened at each
+    step rather than collapsing to a single success/failure.
+    """
+    with run_context(user_id=user_id, run_id=None):
+        sync = sync_sources(user_id)
+
+        try:
+            scoring = score_unscored(limit=req.score_limit)
+        except ProfileMissingError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        # Pitch only genuinely good matches. Drafting outreach for a
+        # 20/100 lead would be the exact generic spam this is supposed to
+        # replace, and it costs a model call to produce something the
+        # human should reject anyway.
+        best = (
+            get_client()
+            .table("opportunity")
+            .select("id,fit_score")
+            .eq("user_id", user_id)
+            .eq("status", "scored")
+            .gte("fit_score", 60)
+            .order("fit_score", desc=True)
+            .limit(req.pitch_top)
+            .execute()
+        ).data or []
+
+        pitched, pitch_errors = [], []
+        for row in best:
+            try:
+                pitched.append(draft_pitch_for(row["id"]))
+            except Exception as exc:
+                pitch_errors.append({"opportunity_id": row["id"], "error": str(exc)[:200]})
+
+    return {
+        "sourced": sync,
+        "scored": {"scored": scoring["scored"], "failed": scoring["failed"]},
+        "pitched": [
+            {"opportunity_id": p["opportunity_id"], "approval_id": p["approval_id"]}
+            for p in pitched
+        ],
+        "pitch_errors": pitch_errors,
+    }
 
 
 @app.post("/opportunities/{opportunity_id}/dismiss")

@@ -111,6 +111,13 @@ export type SyncReport = {
   sources: { kind: string; ok: boolean; fetched?: number; error?: string }[];
 };
 
+export type KickoffResult = {
+  sourced: SyncReport;
+  scored: { scored: number; failed: number };
+  pitched: { opportunity_id: string; approval_id: string }[];
+  pitch_errors: { opportunity_id: string; error: string }[];
+};
+
 export type AgentRun = {
   id: string;
   user_id: string;
@@ -189,6 +196,18 @@ export const api = {
     apiFetch<{ scored: number; failed: number }>(`/opportunities/score`, accessToken, {
       method: "POST",
       body: JSON.stringify({ limit }),
+    }),
+  pitchOpportunity: (accessToken: string, id: string) =>
+    apiFetch<{ approval_id: string; opportunity_id: string; body: string }>(
+      `/opportunities/${id}/pitch`,
+      accessToken,
+      { method: "POST" },
+    ),
+  /** Onboarding's one call: source, score, and pitch the best match. */
+  kickoff: (accessToken: string, scoreLimit = 10, pitchTop = 1) =>
+    apiFetch<KickoffResult>(`/kickoff`, accessToken, {
+      method: "POST",
+      body: JSON.stringify({ score_limit: scoreLimit, pitch_top: pitchTop }),
     }),
   dismissOpportunity: (accessToken: string, id: string) =>
     apiFetch<Opportunity>(`/opportunities/${id}/dismiss`, accessToken, { method: "POST" }),

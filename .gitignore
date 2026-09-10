@@ -222,3 +222,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local scratch from manual API testing -- never commit (tok.txt held a real access token once)
+apps/agent/*.txt
+!apps/agent/requirements.txt

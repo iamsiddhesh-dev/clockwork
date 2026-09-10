@@ -35,8 +35,17 @@ export function Nav() {
     router.refresh();
   }
 
-  // No session yet (or on /login itself) -- skip the app chrome entirely.
-  if (pathname.startsWith("/login") || pathname.startsWith("/auth/")) return null;
+  // No session yet (/login, /auth/*), or a focused first-run flow
+  // (/onboarding) -- skip the app chrome entirely. Onboarding always ends
+  // in explicit navigation buttons, so hiding the nav focuses the flow
+  // without stranding anyone.
+  if (
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/auth/") ||
+    pathname.startsWith("/onboarding")
+  ) {
+    return null;
+  }
 
   return (
     <header className="border-b border-zinc-200 dark:border-zinc-800">

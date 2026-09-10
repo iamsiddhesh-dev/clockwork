@@ -28,7 +28,8 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/approvals";
+  // See the login page's note: "/" routes to onboarding or the inbox.
+  const next = searchParams.get("next") ?? "/";
 
   // Supabase can redirect here with its own error (expired link, etc.)
   // rather than a code -- surface that instead of a generic failure.

@@ -19,7 +19,20 @@ const hint = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
 const field =
   "mt-2 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950";
 
-export function ProfileForm({ initial }: { initial: Profile | null }) {
+export function ProfileForm({
+  initial,
+  submitLabel = "Save profile",
+  onSaved,
+}: {
+  initial: Profile | null;
+  /** Onboarding reuses this form but continues into sourcing, so the
+   * button says what happens next rather than "Save". */
+  submitLabel?: string;
+  /** When given, the caller owns what happens after a successful save
+   * (onboarding kicks off sourcing); the inline "Saved." confirmation is
+   * suppressed so the two don't contradict each other. */
+  onSaved?: (profile: Profile) => void;
+}) {
   const [form, setForm] = useState<Omit<Profile, "id" | "user_id">>(() =>
     initial ? { ...EMPTY, ...initial } : EMPTY,
   );
@@ -77,6 +90,10 @@ export function ProfileForm({ initial }: { initial: Profile | null }) {
       const saved = await api.saveProfile(token, { ...form, skills, portfolio, voice_samples });
       setForm({ ...EMPTY, ...saved });
       setSkillsText((saved.skills ?? []).join(", "));
+      if (onSaved) {
+        onSaved(saved);
+        return; // caller drives the next step and its own status display
+      }
       setStatus("saved");
     } catch (err) {
       setStatus("error");
@@ -311,9 +328,9 @@ export function ProfileForm({ initial }: { initial: Profile | null }) {
           disabled={status === "saving"}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
         >
-          {status === "saving" ? "Saving..." : "Save profile"}
+          {status === "saving" ? "Saving..." : submitLabel}
         </button>
-        {status === "saved" && (
+        {status === "saved" && !onSaved && (
           <span className="text-sm text-emerald-600 dark:text-emerald-400">Saved.</span>
         )}
         {status === "error" && (

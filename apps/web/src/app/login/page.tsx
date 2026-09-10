@@ -6,7 +6,9 @@ import { createClient } from "@/lib/supabase/client";
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/approvals";
+  // "/" rather than a screen: the root decides between onboarding and the
+  // inbox based on whether this account has a profile yet.
+  const next = searchParams.get("next") ?? "/";
 
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
