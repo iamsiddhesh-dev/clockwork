@@ -34,6 +34,31 @@ from .retry import root_rate_limit_error
 MAX_TASK_ATTEMPTS = 5
 
 
+def _thread_for_quote(quote_id: str, user_id: str) -> str | None:
+    """A quote points at a deal, and the conversation lives on the deal's
+    thread. Resolved here rather than carried on the task payload so a
+    task written before the deal moved still finds the right thread."""
+    client = get_client()
+    quote = (
+        client.table("quote")
+        .select("deal_id")
+        .eq("id", quote_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not quote or not quote.data:
+        return None
+    deal = (
+        client.table("deal")
+        .select("thread_id")
+        .eq("id", quote.data["deal_id"])
+        .maybe_single()
+        .execute()
+    )
+    return deal.data["thread_id"] if deal and deal.data else None
+
+
 def _pending_tasks() -> list[dict]:
     res = get_client().table("task").select("*").eq("status", "pending").execute()
     return res.data or []
@@ -96,6 +121,47 @@ def _run_task(task: dict) -> dict:
             "\"still a draft\" -- an outbound message in get_thread's "
             "output means it was already sent. Go by message order only."
         )
+    elif task["kind"] == "invoice_chase":
+        # No judgement call to make here at all. chase_payment already
+        # knows every reason not to send -- paid, void, still a draft, not
+        # yet due -- and returns action "none" for each. Asking the model
+        # to decide first would only add a way for it to get that wrong,
+        # and getting it wrong means dunning a client who already paid.
+        prompt = (
+            f"Scheduled payment check on invoice {task['subject_id']}. It was "
+            f"scheduled because: {reason}\n\n"
+            f"Call chase_payment({task['subject_id']!r}) and report exactly what it "
+            "returned. If it returns action \"none\", that is the correct outcome -- "
+            "the invoice is paid, void, or not yet due. Do not draft anything else, "
+            "and do not use any other tool."
+        )
+
+    elif task["kind"] == "quote_chase":
+        # Same mechanical rule as the thread follow-up, for the same
+        # reason: comparing the direction of the last message is something
+        # a model does reliably; reasoning about what "quoted" implies
+        # about our own approval lifecycle is not.
+        thread_id = _thread_for_quote(task["subject_id"], task["user_id"])
+        if thread_id is None:
+            prompt = (
+                f"Scheduled check on quote {task['subject_id']}, but the quote or its "
+                "deal no longer exists. Do nothing and say so."
+            )
+        else:
+            prompt = (
+                f"Scheduled check on a quote that was sent on thread {thread_id}. It "
+                f"was scheduled because: {reason}\n\n"
+                f"Call get_thread({thread_id!r}) and look at the messages list, in "
+                "order. Apply this rule exactly:\n"
+                "- If the LAST message's direction is \"inbound\", the client has "
+                "responded to the quote -- do nothing, say so, and stop. A human "
+                "records whether they accepted it.\n"
+                "- If the LAST message's direction is \"outbound\", the quote has gone "
+                f"unanswered -- call draft_reply({thread_id!r}) to check in once, "
+                "briefly, without dropping the price or apologising for it.\n"
+                "Go by message order only."
+            )
+
     else:
         prompt = (
             f"Scheduled check-in ({task['kind']}) on {task['subject_type']} "

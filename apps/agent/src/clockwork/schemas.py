@@ -49,3 +49,54 @@ class ExtractedRequirements(BaseModel):
     deliverables: list[str] = Field(default_factory=list)
     deadline: str | None = None
     budget_hint: str | None = None
+
+
+class QuoteLineItem(BaseModel):
+    """One priced line of a quote.
+
+    Note there is no `amount` field. The model supplies quantity and unit
+    price; the line total, the subtotal and the grand total are all
+    computed in Python (see `tools/money.py`). Language models do
+    arithmetic plausibly rather than correctly, and a quote that adds up
+    wrong is worse than no quote at all -- it is the one document where
+    being confidently off by a digit costs the freelancer real money and
+    their credibility in the same email.
+    """
+
+    description: str = Field(
+        description="What this line covers, in the client's terms, e.g. "
+        "'Migrate subscription billing to Stripe Billing'"
+    )
+    quantity: float = Field(default=1, description="How many units. Use 1 for a fixed-price line.")
+    unit: Literal["hour", "day", "week", "project"] = Field(
+        default="project", description="What one unit is"
+    )
+    unit_price: float = Field(description="Price of a single unit, in the freelancer's currency")
+
+
+class QuoteDraft(BaseModel):
+    """A priced proposal, grounded in the thread and the profile's rates."""
+
+    line_items: list[QuoteLineItem] = Field(
+        description="Two to five lines. Break the work down so the client can see what "
+        "they are paying for; do not hide everything behind one 'development' line."
+    )
+    timeline: str = Field(description="Realistic delivery timing, e.g. '3-4 weeks from kickoff'")
+    assumptions: list[str] = Field(
+        default_factory=list,
+        description="What the price depends on being true -- access, decisions, "
+        "third-party accounts. These are what protect the freelancer from scope creep.",
+    )
+    exclusions: list[str] = Field(
+        default_factory=list,
+        description="What this price explicitly does NOT cover, so it can be quoted separately later.",
+    )
+    covering_note: str = Field(
+        description="Two or three sentences to the client that will sit above the priced "
+        "lines. Reference what they actually asked for. No pleasantries, no restating "
+        "the numbers -- the table below already does that."
+    )
+    rationale: str = Field(
+        description="One or two sentences for the freelancer (not the client) on how this "
+        "was priced, citing the profile's rates and what the thread actually asked for."
+    )

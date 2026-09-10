@@ -118,6 +118,66 @@ export type KickoffResult = {
   pitch_errors: { opportunity_id: string; error: string }[];
 };
 
+export type QuoteLineItem = {
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  amount: number;
+};
+
+export type Quote = {
+  id: string;
+  user_id: string;
+  deal_id: string;
+  currency: string;
+  line_items: QuoteLineItem[];
+  subtotal: number;
+  total: number;
+  timeline: string | null;
+  assumptions: string[];
+  exclusions: string[];
+  payment_terms: string | null;
+  valid_until: string | null;
+  status: "draft" | "sent" | "accepted" | "declined" | "expired";
+  sent_at: string | null;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Invoice = {
+  id: string;
+  user_id: string;
+  deal_id: string;
+  quote_id: string | null;
+  number: string;
+  currency: string;
+  amount: number;
+  line_items: QuoteLineItem[];
+  payment_terms: string | null;
+  status: "draft" | "sent" | "paid" | "void";
+  issued_at: string | null;
+  due_at: string | null;
+  paid_at: string | null;
+  chase_count: number;
+  last_chased_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** chase_payment returns one of two shapes: it drafted a reminder, or it
+ * correctly decided there was nothing to chase. */
+export type ChaseResult =
+  | { action: "none"; reason: string }
+  | {
+      action: "chase_drafted";
+      approval_id: string;
+      invoice_id: string;
+      days_overdue: number;
+      body: string;
+    };
+
 export type AgentRun = {
   id: string;
   user_id: string;
@@ -185,6 +245,33 @@ export const api = {
     }),
 
   listDeals: (accessToken: string) => apiFetch<Deal[]>(`/deals`, accessToken, { cache: "no-store" }),
+  quoteDeal: (accessToken: string, dealId: string) =>
+    apiFetch<{ approval_id: string; quote_id: string; total: number; currency: string; body: string }>(
+      `/deals/${dealId}/quote`,
+      accessToken,
+      { method: "POST" },
+    ),
+
+  listQuotes: (accessToken: string) =>
+    apiFetch<Quote[]>(`/quotes`, accessToken, { cache: "no-store" }),
+  /** Human-only: the agent has no tool for these three. */
+  acceptQuote: (accessToken: string, id: string) =>
+    apiFetch<Quote>(`/quotes/${id}/accepted`, accessToken, { method: "POST" }),
+  declineQuote: (accessToken: string, id: string) =>
+    apiFetch<Quote>(`/quotes/${id}/declined`, accessToken, { method: "POST" }),
+  invoiceQuote: (accessToken: string, id: string) =>
+    apiFetch<{ approval_id: string; invoice_id: string; number: string; body: string }>(
+      `/quotes/${id}/invoice`,
+      accessToken,
+      { method: "POST" },
+    ),
+
+  listInvoices: (accessToken: string) =>
+    apiFetch<Invoice[]>(`/invoices`, accessToken, { cache: "no-store" }),
+  markInvoicePaid: (accessToken: string, id: string) =>
+    apiFetch<Invoice>(`/invoices/${id}/paid`, accessToken, { method: "POST" }),
+  chaseInvoice: (accessToken: string, id: string) =>
+    apiFetch<ChaseResult>(`/invoices/${id}/chase`, accessToken, { method: "POST" }),
 
   listOpportunities: (accessToken: string) =>
     apiFetch<Opportunity[]>(`/opportunities`, accessToken, { cache: "no-store" }),

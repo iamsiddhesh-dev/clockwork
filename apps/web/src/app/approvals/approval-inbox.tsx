@@ -16,6 +16,14 @@ function actionVerb(actionType: string) {
   switch (actionType) {
     case "send_email":
       return "Send this reply";
+    case "send_pitch":
+      return "Send this pitch";
+    case "send_quote":
+      return "Send this quote";
+    case "send_invoice":
+      return "Send this invoice";
+    case "send_payment_chase":
+      return "Send this payment reminder";
     default:
       return `Run ${actionType}`;
   }

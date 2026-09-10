@@ -11,7 +11,8 @@ Freelancers don't quit because they can't do the work. They quit because of ever
 ## What it actually does
 
 ```
-Source → Score → Pitch → Reply → Qualify → Draft → Approve → Follow up
+Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase → Paid
+                            └────── every outbound step: Approve ──────┘
 ```
 
 1. **Sources real work** from three public feeds — Hacker News' monthly hiring thread, Remotive, and RemoteOK — filtered for contract and freelance postings.
@@ -21,8 +22,9 @@ Source → Score → Pitch → Reply → Qualify → Draft → Approve → Follo
    > *"I recently migrated a legacy invoicing flow to Stripe Billing for a B2B SaaS, cutting failed-payment churn by 40%."*
 
    That sentence is generated, but the 40% comes from the user's own portfolio entry. Nothing is invented.
-4. **Waits for you.** Every client-facing action queues in an Approval Inbox showing four things: what it will do, why, what it read, and what changes in the database. Nothing is ever sent without a human pressing approve.
-5. **Acts on its own schedule.** When a message goes out, a follow-up is scheduled automatically. Days later the agent wakes up, re-reads the thread, and decides whether to nudge — or correctly does nothing if the client already replied.
+4. **Prices the work, invoices it, and chases the money.** A quote is broken into lines the client can actually evaluate, priced off the freelancer's own rates. Once they accept, it raises the invoice and arms a chaser whose tone escalates with each unanswered reminder — because the fourth reminder reading exactly like the first is why people stop sending them.
+5. **Waits for you.** Every client-facing action queues in an Approval Inbox showing four things: what it will do, why, what it read, and what changes in the database. Nothing is ever sent without a human pressing approve.
+6. **Acts on its own schedule.** When a message goes out, a follow-up is scheduled automatically. Days later the agent wakes up, re-reads the thread, and decides whether to nudge — or correctly does nothing if the client already replied.
 
 ### Two triggers, one entry point
 
@@ -51,16 +53,24 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 
 | Feature | How |
 |---|---|
-| `@tool` | 9 typed tools, all of which mutate real business state |
+| `@tool` | 12 typed tools, all of which mutate real business state |
 | `structured_output_model=` | Pydantic schemas for every extraction/scoring step — no string parsing anywhere |
 | Hooks | `BeforeToolCallEvent` / `AfterToolCallEvent` / `AfterInvocationEvent` → the `agent_event` audit trail |
 | Model abstraction | One `Role` enum (orchestrator / writer / extractor) routed to different models per job |
 
 ### The tools
 
-`recall` · `get_thread` · `log_message` · `extract_requirements` · `qualify_lead` · `draft_reply`\* · `schedule_task` · `score_fit` · `draft_pitch`\*
+`recall` · `get_thread` · `log_message` · `extract_requirements` · `qualify_lead` · `draft_reply`\* · `schedule_task` · `score_fit` · `draft_pitch`\* · `draft_quote`\* · `draft_invoice`\* · `chase_payment`\*
 
 \* approval-gated
+
+### Three rules the money tail is built on
+
+Getting paid is the half of freelancing people avoid, and it is the half where an agent doing something plausible-but-wrong costs real money. So:
+
+- **Python does the arithmetic, never the model.** The writer proposes line items with quantities and unit prices; totals, due dates and invoice numbers are computed in code. A model will produce a quote that adds up wrong with total confidence, and that is the one document where a wrong digit costs the freelancer money and credibility in the same email.
+- **You cannot invoice work that was never agreed.** `draft_invoice` refuses unless a human has recorded the quote as accepted. "They sounded keen" is not acceptance, and there is deliberately no tool that lets the agent decide otherwise — accepting, declining and marking paid are human-only API routes.
+- **Chasing escalates, and stops.** Reminder tone is driven by a written-out ladder indexed on `invoice.chase_count`, and that counter only advances when a reminder is actually approved and sent — a draft you rejected doesn't make the next one angrier. Marking an invoice paid cancels the pending chase task, because an agent that keeps dunning a client who already paid is worse than one that never chased at all.
 
 ---
 
@@ -90,6 +100,7 @@ apps/agent/db/001_schema.sql
 apps/agent/db/002_agent_runtime.sql
 apps/agent/db/003_grants.sql
 apps/agent/db/004_sourcing.sql
+apps/agent/db/005_money.sql
 
 # 2. Backend
 cd apps/agent
@@ -125,7 +136,7 @@ apps/agent/          FastAPI + the Strands agent
     models.py        Bedrock ⇄ Groq router, per-role pricing
     scheduler.py     tick() — drains due tasks, fires the agent
     sources/         one adapter per public feed
-    tools/           the 9 agent tools
+    tools/           the 12 agent tools (money.py = quote/invoice/chase)
   db/                SQL migrations, applied in order
 
 apps/web/            Next.js 16 (App Router)
@@ -133,6 +144,7 @@ apps/web/            Next.js 16 (App Router)
     onboarding/      first run: profile → source → score → pitch
     approvals/       the Approval Inbox — keyboard-driven a/r/e
     opportunities/   sourced leads, ranked by fit
+    money/           quotes and invoices — accept, decline, mark paid, chase
     runs/            Run Trace — live SSE replay of any agent run
 ```
 
@@ -143,7 +155,8 @@ apps/web/            Next.js 16 (App Router)
 Stated plainly, because a demo that hides these is worth less than one that doesn't:
 
 - **Email is not wired.** Approving a message records it as sent and updates the thread; it does not transmit. Gmail's `gmail.send` is a restricted scope requiring a CASA Tier 2 audit, which is not achievable in a hackathon window, so it was deliberately deferred rather than half-built.
-- **The money tail (quote → invoice → payment chasing) is not built.** The scheduler chases follow-ups, not invoices.
+- **No payment processor.** Marking an invoice paid is a human action. There is no Stripe integration, no card data, and nothing here can move money — taking payment is not something this agent should be able to do, and faking a processor for a demo would misrepresent where the human stays in the loop.
+- **No tax handling on quotes.** VAT and sales tax depend on both parties' jurisdictions, which is a real compliance question rather than one to guess at. `subtotal` and `total` are separate columns so adding it later needs no migration.
 - **No automated tests.** Every claim here was verified by hand against live feeds and a real database.
 
 ## Licence

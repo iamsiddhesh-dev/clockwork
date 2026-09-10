@@ -7,6 +7,14 @@ Routes:
   GET   /threads                   -> list threads (Threads view)
   GET   /threads/{id}              -> thread + messages + its deal
   GET   /deals                     -> list deals (pipeline table)
+  POST  /deals/{id}/quote          -> price the deal, queue a send_quote
+  GET   /quotes                    -> list quotes (Money screen)
+  POST  /quotes/{id}/accepted      -> human records the client said yes
+  POST  /quotes/{id}/declined      -> human records the client said no
+  POST  /quotes/{id}/invoice       -> raise an invoice for an accepted quote
+  GET   /invoices                  -> list invoices
+  POST  /invoices/{id}/paid        -> human records payment received
+  POST  /invoices/{id}/chase       -> draft the next payment reminder
   GET   /approvals?status=pending  -> list approvals (the signature screen)
   PATCH /approvals/{id}            -> edit a pending approval's payload
                                        (the "e" in a/r/e)
@@ -60,6 +68,7 @@ from .db import get_client
 from .executor import execute_approval
 from .scheduler import tick, tick_all_due
 from .sources import ensure_sources, sync_sources
+from .tools.money import chase_payment_for, draft_invoice_for, draft_quote_for
 from .tools.pitching import draft_pitch_for
 from .tools.sourcing import ProfileMissingError, score_unscored
 
@@ -471,6 +480,189 @@ def list_deals(user_id: str = Depends(get_current_user_id)) -> list[dict]:
         .execute()
     )
     return res.data or []
+
+
+@app.post("/deals/{deal_id}/quote")
+def quote_deal(deal_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Price one deal. Queues a send_quote approval -- nothing is sent."""
+    with run_context(user_id=user_id, run_id=None):
+        try:
+            return draft_quote_for(deal_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+# ── money ───────────────────────────────────────────────────────────────
+#
+# The four routes that record what the *client* did (accepted, declined,
+# paid) are deliberately human-only -- there is no tool for them and the
+# agent cannot call them. Inferring "they accepted" from an enthusiastic
+# email is exactly the kind of guess that ends with a stranger being
+# invoiced for work they never agreed to.
+
+
+@app.get("/quotes")
+def list_quotes(user_id: str = Depends(get_current_user_id)) -> list[dict]:
+    res = (
+        get_client()
+        .table("quote")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
+def _owned_quote(client, quote_id: str, user_id: str) -> dict:
+    res = (
+        client.table("quote")
+        .select("*")
+        .eq("id", quote_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise HTTPException(404, "quote not found")
+    return res.data
+
+
+def _decide_quote(quote_id: str, user_id: str, status: str) -> dict:
+    client = get_client()
+    quote = _owned_quote(client, quote_id, user_id)
+    if quote["status"] not in ("sent", "expired"):
+        raise HTTPException(
+            409,
+            f"quote is {quote['status']!r} -- only a quote that has actually been sent "
+            "can be marked accepted or declined.",
+        )
+    updated = (
+        client.table("quote")
+        .update({"status": status, "decided_at": "now()", "updated_at": "now()"})
+        .eq("id", quote_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    # A decided quote needs no further chasing. Cancel rather than delete,
+    # so the trace of what was scheduled and why survives.
+    client.table("task").update({"status": "cancelled"}).eq("subject_id", quote_id).eq(
+        "kind", "quote_chase"
+    ).eq("status", "pending").execute()
+
+    if status == "declined":
+        client.table("deal").update({"stage": "lost", "updated_at": "now()"}).eq(
+            "id", quote["deal_id"]
+        ).eq("user_id", user_id).execute()
+
+    return updated.data[0]
+
+
+@app.post("/quotes/{quote_id}/accepted")
+def accept_quote(quote_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """The human records that the client accepted. This is the only thing
+    that unlocks invoicing."""
+    return _decide_quote(quote_id, user_id, "accepted")
+
+
+@app.post("/quotes/{quote_id}/declined")
+def decline_quote(quote_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    return _decide_quote(quote_id, user_id, "declined")
+
+
+@app.post("/quotes/{quote_id}/invoice")
+def invoice_quote(quote_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Raise an invoice against an accepted quote. Queues a send_invoice
+    approval -- nothing is sent."""
+    with run_context(user_id=user_id, run_id=None):
+        try:
+            return draft_invoice_for(quote_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/invoices")
+def list_invoices(user_id: str = Depends(get_current_user_id)) -> list[dict]:
+    res = (
+        get_client()
+        .table("invoice")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
+@app.post("/invoices/{invoice_id}/paid")
+def mark_invoice_paid(invoice_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """The human records that the money arrived. Closes the deal as won
+    and, critically, cancels the pending chase task -- an agent that keeps
+    dunning a client who already paid is worse than one that never
+    chased at all."""
+    client = get_client()
+    res = (
+        client.table("invoice")
+        .select("*")
+        .eq("id", invoice_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise HTTPException(404, "invoice not found")
+    invoice = res.data
+    if invoice["status"] == "paid":
+        return invoice
+    if invoice["status"] != "sent":
+        raise HTTPException(409, f"invoice is {invoice['status']!r}, not 'sent'")
+
+    updated = (
+        client.table("invoice")
+        .update({"status": "paid", "paid_at": "now()", "updated_at": "now()"})
+        .eq("id", invoice_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    client.table("task").update({"status": "cancelled"}).eq("subject_id", invoice_id).eq(
+        "kind", "invoice_chase"
+    ).eq("status", "pending").execute()
+    client.table("deal").update({"stage": "won", "updated_at": "now()"}).eq(
+        "id", invoice["deal_id"]
+    ).eq("user_id", user_id).execute()
+
+    # Cancelling the scheduled task is not enough on its own: a reminder
+    # that was already drafted is sitting in the Approval Inbox as a live
+    # card, and approving it would send a dunning message for an invoice
+    # that has been paid. Found exactly that way -- a test run approved a
+    # stale card and logged the message. Reject them here so the card
+    # disappears the moment the money is recorded.
+    stale = (
+        client.table("approval")
+        .select("id, payload")
+        .eq("user_id", user_id)
+        .eq("action_type", "send_payment_chase")
+        .eq("status", "pending")
+        .execute()
+    ).data or []
+    for approval in stale:
+        if (approval.get("payload") or {}).get("invoice_id") == invoice_id:
+            client.table("approval").update(
+                {"status": "rejected", "decided_at": "now()"}
+            ).eq("id", approval["id"]).execute()
+
+    return updated.data[0]
+
+
+@app.post("/invoices/{invoice_id}/chase")
+def chase_invoice(invoice_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Draft the next payment reminder now, rather than waiting for the
+    scheduled check. Returns action "none" if there is nothing to chase."""
+    with run_context(user_id=user_id, run_id=None):
+        try:
+            return chase_payment_for(invoice_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
 
 # ── approvals ───────────────────────────────────────────────────────────

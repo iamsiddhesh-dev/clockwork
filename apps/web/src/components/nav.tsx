@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/opportunities", label: "Opportunities" },
   { href: "/threads", label: "Threads" },
   { href: "/deals", label: "Deals" },
+  { href: "/money", label: "Money" },
   { href: "/runs", label: "Run Trace" },
   { href: "/profile", label: "Profile" },
 ];
