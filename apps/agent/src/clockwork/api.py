@@ -3,9 +3,12 @@
 Routes:
   POST  /runs                      -> run_agent(), returns run_id
   GET   /runs                      -> list recent runs (Run Trace panel)
-  GET   /runs/{id}/events?token=.. -> SSE stream of agent_event rows
+  POST  /accounts                  -> create a workspace (onboarding step 1)
+  GET   /runs/{id}/events?account= -> SSE stream of agent_event rows
   GET   /threads                   -> list threads (Threads view)
   GET   /threads/{id}              -> thread + messages + its deal
+  GET   /summary                   -> chrome poll: badge, spend, next wake
+  GET   /overview                  -> everything the dashboard renders
   GET   /deals                     -> list deals (pipeline table)
   POST  /deals/{id}/quote          -> price the deal, queue a send_quote
   GET   /quotes                    -> list quotes (Money screen)
@@ -32,15 +35,15 @@ Gmail OAuth (inbound polling / send) is not wired here yet -- see
 executor.py's TODO. It needs a Google Cloud console app set up by hand
 before any code can use it.
 
-Auth: every route above except /intake and /health requires
-`Authorization: Bearer <supabase access token>` (see auth.py) and derives
-`user_id` from the verified token -- never from a client-supplied param.
-Every route that touches one specific resource (a thread, an approval, a
-run) also checks that resource's own user_id matches the caller, not just
-that *some* valid token was presented. The SSE route is the one
-exception to the header rule: browser EventSource can't send custom
-headers, so it takes `?token=` as a query param instead, verified the
-same way.
+Identity: every route above except /accounts, /intake and /health
+requires an `X-Clockwork-Account: <uuid>` header naming an existing
+workspace (see auth.py, which is explicit that this identifies rather
+than authenticates). Every route that touches one specific resource (a
+thread, an approval, a run) also checks that resource's own user_id
+matches the caller, so knowing one id never leaks another workspace. The
+SSE route is the one exception to the header rule: browser EventSource
+can't send custom headers, so it takes `?account=` as a query param
+instead, resolved the same way.
 
 Background: an APScheduler job polls `scheduler.tick_all_due()` every 30s
 so tasks fire in real time too, not only right after `/clock/advance`
@@ -62,10 +65,11 @@ from pydantic import BaseModel
 
 from . import clock
 from .agent import Trigger, run_agent
-from .auth import get_current_user_id, verify_token
+from .auth import account_from_query, create_account, get_current_user_id
 from .context import run_context
 from .db import get_client
 from .executor import execute_approval
+from .overview import overview as build_overview, summary as build_summary
 from .scheduler import tick, tick_all_due
 from .sources import ensure_sources, sync_sources
 from .tools.money import chase_payment_for, draft_invoice_for, draft_quote_for
@@ -113,6 +117,18 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+# ── workspace ───────────────────────────────────────────────────────────
+
+
+@app.post("/accounts")
+def post_account() -> dict:
+    """Start a workspace. Open by design -- this is the front door, and
+    the caller has nothing to identify themselves with yet. It creates an
+    empty row and nothing else; a workspace with no profile is inert, so
+    the worst an abusive caller achieves is empty rows."""
+    return {"account_id": create_account()}
 
 
 # ── runs ────────────────────────────────────────────────────────────────
@@ -173,13 +189,12 @@ def get_run(run_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
 
 
 @app.get("/runs/{run_id}/events")
-async def stream_run_events(run_id: str, token: str):
+async def stream_run_events(run_id: str, user_id: str = Depends(account_from_query)):
     """SSE stream of agent_event rows for a run, polling Postgres (no
     Supabase Realtime dependency for Phase 1 -- swap for a Realtime
     subscription later if polling latency becomes visible). Takes
-    `?token=` rather than an Authorization header -- see module
-    docstring; browser EventSource cannot set custom headers."""
-    user_id = verify_token(token)
+    `?account=` rather than a header -- see module docstring; browser
+    EventSource cannot set custom headers."""
     client = get_client()
 
     run_res = client.table("agent_run").select("user_id").eq("id", run_id).maybe_single().execute()
@@ -280,12 +295,14 @@ def get_thread_detail(thread_id: str, user_id: str = Depends(get_current_user_id
 
 class ProfileBody(BaseModel):
     name: str
+    email: str | None = None
     skills: list[str] = []
     rates: dict[str, Any] = {}
     positioning: str | None = None
     voice_samples: list[str] = []
     portfolio: list[dict[str, Any]] = []
     payment_terms: str | None = None
+    timezone: str | None = None
 
 
 @app.get("/profile")
@@ -464,6 +481,22 @@ def dismiss_opportunity(
     if not res.data:
         raise HTTPException(404, "opportunity not found")
     return res.data[0]
+
+
+# ── dashboard ───────────────────────────────────────────────────────────
+
+
+@app.get("/summary")
+def get_summary(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Polled by the app chrome every 30s for the approvals badge, the
+    spend-against-cap line and the next scheduled wake."""
+    return build_summary(user_id)
+
+
+@app.get("/overview")
+def get_overview(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Every number on the Overview screen, computed from real rows."""
+    return build_overview(user_id)
 
 
 # ── deals ───────────────────────────────────────────────────────────────

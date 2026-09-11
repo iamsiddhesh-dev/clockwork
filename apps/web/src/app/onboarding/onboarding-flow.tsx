@@ -1,12 +1,20 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type KickoffResult, type Profile } from "@/lib/api";
-import { createClient } from "@/lib/supabase/client";
-import { ProfileForm } from "@/app/profile/profile-form";
+import { ensureAccount } from "@/lib/account";
+import { Logo } from "@/components/shell/icons";
+import {
+  EMPTY_PROFILE,
+  ProfileFields,
+  STEPS,
+  stepErrors,
+  type ProfileDraft,
+  type StepKey,
+} from "@/app/profile/profile-form";
 
-type Stage = "profile" | "working" | "done" | "error";
+type Stage = "form" | "working" | "done" | "error";
 
 const SOURCE_LABEL: Record<string, string> = {
   hacker_news: "Hacker News",
@@ -15,103 +23,223 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 /**
- * First run: tell it who you are, and it goes to work.
+ * The front door.
  *
- * Deliberately one continuous flow rather than "save your profile" then
- * "now go find the Opportunities tab and press two buttons". The product
- * claim is an agent that does the work; a first run that ends in real
- * outreach waiting for approval demonstrates that, a settings page does
- * not.
+ * There is no sign-in: filling this in creates the workspace, and the
+ * workspace id goes in a cookie. That is a deliberate trade -- see
+ * apps/agent/src/clockwork/auth.py, which is explicit that it identifies
+ * rather than authenticates.
+ *
+ * It runs straight into real work rather than ending on "profile saved".
+ * The product claim is an agent that does the business half; a first run
+ * that ends with actual outreach waiting for approval demonstrates that,
+ * and a settings page does not.
  */
 export function OnboardingFlow({ initial }: { initial: Profile | null }) {
   const router = useRouter();
-  const [stage, setStage] = useState<Stage>("profile");
+  const [stage, setStage] = useState<Stage>("form");
+  const [stepIndex, setStepIndex] = useState(0);
+  const [form, setForm] = useState<ProfileDraft>(() =>
+    initial ? { ...EMPTY_PROFILE, ...initial } : EMPTY_PROFILE,
+  );
+  const [skillsText, setSkillsText] = useState((initial?.skills ?? []).join(", "));
+  const [touched, setTouched] = useState(false);
   const [result, setResult] = useState<KickoffResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which half failed. "Your profile saved, sourcing didn't" is a very
+  // different message from "nothing saved at all", and showing the
+  // reassuring one when nothing was written would be a lie.
+  const [profileSaved, setProfileSaved] = useState(false);
 
-  const supabase = useMemo(() => createClient(), []);
-  const getToken = useCallback(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) throw new Error("Not signed in");
-    return session.access_token;
-  }, [supabase]);
+  const errors = useMemo(() => stepErrors(form, skillsText), [form, skillsText]);
+  const step = STEPS[stepIndex];
+  const stepError = errors[step.key as StepKey];
+  const isLast = stepIndex === STEPS.length - 1;
 
-  const handleSaved = useCallback(async () => {
+  async function next() {
+    if (stepError) {
+      setTouched(true);
+      return;
+    }
+    setTouched(false);
+    if (!isLast) {
+      setStepIndex((i) => i + 1);
+      return;
+    }
+
     setStage("working");
     setError(null);
     try {
-      const token = await getToken();
-      setResult(await api.kickoff(token, 10, 1));
+      const account = await ensureAccount();
+      await api.saveProfile(account, {
+        ...form,
+        portfolio: form.portfolio.filter((p) => p.title.trim() && p.summary.trim()),
+      });
+      setProfileSaved(true);
+      setResult(await api.kickoff(account, 10, 1));
       setStage("done");
     } catch (err) {
       setError((err as Error).message);
       setStage("error");
     }
-  }, [getToken]);
+  }
 
-  if (stage === "profile") {
+  // ── the form ──────────────────────────────────────────────────────
+  if (stage === "form") {
     return (
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Step 1 of 2
+      <Frame>
+        <div className="cw-row" style={{ gap: 6, marginBottom: 22 }}>
+          {STEPS.map((s, i) => (
+            <span
+              key={s.key}
+              title={s.label}
+              style={{
+                height: 3,
+                flex: 1,
+                borderRadius: 3,
+                background: i <= stepIndex ? "var(--orange)" : "var(--rim)",
+                transition: "background var(--t)",
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="cw-label">
+          Step {stepIndex + 1} of {STEPS.length} · {step.label}
+        </div>
+        <h1 className="cw-h1" style={{ marginTop: 12 }}>
+          {stepIndex === 0
+            ? "Tell Clockwork who you are."
+            : stepIndex === 1
+              ? "What you do, and what it costs."
+              : "What you have already done."}
+        </h1>
+        <p
+          style={{
+            margin: "12px 0 26px",
+            fontSize: 14.5,
+            lineHeight: 1.6,
+            color: "var(--dim)",
+            maxWidth: "54ch",
+          }}
+        >
+          {stepIndex === 0
+            ? "This is the only setup there is. Everything after it — which leads are worth your time, what the outreach says, whose voice it is in — is grounded in what you put here."
+            : stepIndex === 1
+              ? "Quote totals are computed from your rate in code, never guessed by a model. Skills are what every sourced posting gets ranked against."
+              : "This is the part that decides whether outreach lands. The agent cites these results by name and never invents one."}
         </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Tell Clockwork who you are</h1>
-        <p className="mt-1 max-w-2xl text-sm text-zinc-500 dark:text-zinc-400">
-          This is the only setup there is. Everything after it &mdash; which leads are worth your
-          time, what the outreach says, whose voice it&rsquo;s in &mdash; is grounded in what you
-          put here. The portfolio matters most: pitches quote it by name.
-        </p>
-        <ProfileForm
-          initial={initial}
-          submitLabel="Save and find me work"
-          onSaved={handleSaved}
+
+        <ProfileFields
+          form={form}
+          setForm={setForm}
+          skillsText={skillsText}
+          setSkillsText={setSkillsText}
+          only={step.key as StepKey}
         />
-      </div>
+
+        <div className="cw-row" style={{ marginTop: 28 }}>
+          {stepIndex > 0 && (
+            <button
+              className="cw-btn"
+              onClick={() => {
+                setTouched(false);
+                setStepIndex((i) => i - 1);
+              }}
+            >
+              Back
+            </button>
+          )}
+          <button className="cw-btn cw-btn-primary" onClick={next}>
+            {isLast ? "Save and find me work" : "Continue"}
+          </button>
+          {touched && stepError && (
+            <span style={{ fontSize: 13, color: "var(--bad)", flex: "1 1 100%" }}>{stepError}</span>
+          )}
+        </div>
+      </Frame>
     );
   }
 
+  // ── working ───────────────────────────────────────────────────────
   if (stage === "working") {
     return (
-      <div className="py-16 text-center">
-        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Step 2 of 2
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Going to work…</h1>
-        <p className="mx-auto mt-3 max-w-md text-sm text-zinc-500 dark:text-zinc-400">
+      <Frame>
+        <div className="cw-label">Going to work</div>
+        <h1 className="cw-h1" style={{ marginTop: 12 }}>
+          Reading the boards now.
+        </h1>
+        <p
+          style={{
+            margin: "14px 0 0",
+            fontSize: 14.5,
+            lineHeight: 1.6,
+            color: "var(--dim)",
+            maxWidth: "52ch",
+          }}
+        >
           Pulling live postings from Hacker News, Remotive and RemoteOK, scoring each one against
-          your profile, and drafting outreach for anything genuinely worth your time. Takes about a
+          what you just wrote, and drafting outreach for anything genuinely worth your time. About a
           minute.
         </p>
-        <div className="mx-auto mt-6 h-1 w-48 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-          <div className="h-full w-1/3 animate-pulse rounded-full bg-zinc-900 dark:bg-zinc-100" />
+        <div
+          style={{
+            marginTop: 28,
+            height: 3,
+            width: "100%",
+            maxWidth: 280,
+            borderRadius: 3,
+            background: "var(--rim)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: "38%",
+              borderRadius: 3,
+              background: "var(--orange)",
+              animation: "cw-pulse 1.6s ease-in-out infinite",
+            }}
+          />
         </div>
-      </div>
+      </Frame>
     );
   }
 
+  // ── error ─────────────────────────────────────────────────────────
   if (stage === "error") {
     return (
-      <div className="py-16 text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">Your profile saved</h1>
-        <p className="mx-auto mt-3 max-w-md text-sm text-red-600 dark:text-red-400">
-          But sourcing didn&rsquo;t finish: {error}
+      <Frame>
+        <div className="cw-label">{profileSaved ? "Partly done" : "Didn’t save"}</div>
+        <h1 className="cw-h1" style={{ marginTop: 12 }}>
+          {profileSaved ? "Your profile saved." : "That didn’t go through."}
+        </h1>
+        <p style={{ margin: "14px 0 0", fontSize: 14.5, color: "var(--bad)", maxWidth: "52ch" }}>
+          {profileSaved ? "Sourcing didn’t finish: " : ""}
+          {error}
         </p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500 dark:text-zinc-400">
-          Nothing is lost &mdash; you can run it again from the Opportunities screen.
+        <p style={{ margin: "10px 0 0", fontSize: 14, color: "var(--dim)", maxWidth: "52ch" }}>
+          {profileSaved
+            ? "Nothing is lost — you can run it again from the Opportunities screen."
+            : "Nothing was written. Check the agent API is running, then try again — what you typed is still here."}
         </p>
-        <button
-          onClick={() => router.push("/opportunities")}
-          className="mt-6 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-        >
-          Go to Opportunities
-        </button>
-      </div>
+        <div className="cw-row" style={{ marginTop: 26 }}>
+          {profileSaved ? (
+            <button className="cw-btn cw-btn-primary" onClick={() => router.push("/opportunities")}>
+              Go to Opportunities
+            </button>
+          ) : (
+            <button className="cw-btn cw-btn-primary" onClick={() => setStage("form")}>
+              Back to the form
+            </button>
+          )}
+        </div>
+      </Frame>
     );
   }
 
-  // done
+  // ── done ──────────────────────────────────────────────────────────
   const sourced = result?.sourced.total ?? 0;
   const scored = result?.scored.scored ?? 0;
   const pitched = result?.pitched.length ?? 0;
@@ -121,68 +249,84 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
     .join(" · ");
 
   return (
-    <div className="py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Done. Here&rsquo;s what happened.</h1>
+    <Frame>
+      <div className="cw-label">First run complete</div>
+      <h1 className="cw-h1" style={{ marginTop: 12 }}>
+        Here&rsquo;s what it did.
+      </h1>
 
-      <ul className="mt-6 flex flex-col gap-3">
-        <li className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <p className="font-medium">Sourced {sourced} live postings</p>
-          <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{perSource}</p>
-        </li>
-        <li className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <p className="font-medium">Scored {scored} against your profile</p>
-          <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-            Each one ranked 0&ndash;100 with a reason and the evidence from your own portfolio.
-          </p>
-        </li>
-        <li
-          className={`rounded-lg border p-4 ${
+      <ul style={{ listStyle: "none", margin: "26px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+        <Outcome title={`Sourced ${sourced} live postings`} note={perSource || "three public feeds"} />
+        <Outcome
+          title={`Scored ${scored} against your profile`}
+          note="Each ranked 0–100 with a reason and the evidence from your own portfolio."
+        />
+        <Outcome
+          highlight={pitched > 0}
+          title={
             pitched > 0
-              ? "border-emerald-300 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950"
-              : "border-zinc-200 dark:border-zinc-800"
-          }`}
-        >
-          {pitched > 0 ? (
-            <>
-              <p className="font-medium">
-                Drafted {pitched} pitch{pitched === 1 ? "" : "es"} &mdash; waiting for your approval
-              </p>
-              <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">
-                Nothing was sent. Read it, edit it, then approve or reject.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="font-medium">No pitch drafted yet</p>
-              <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-                Nothing in this batch scored high enough to be worth your time. That&rsquo;s
-                deliberate &mdash; writing outreach for a weak match is the spam this replaces.
-                Score more from the Opportunities screen.
-              </p>
-            </>
-          )}
-        </li>
+              ? `Drafted ${pitched} pitch${pitched === 1 ? "" : "es"} — waiting for you`
+              : "No pitch drafted yet"
+          }
+          note={
+            pitched > 0
+              ? "Nothing was sent. Read it, edit it, then approve or reject."
+              : "Nothing in this batch cleared the bar. That is deliberate — writing outreach for a weak match is the spam this replaces."
+          }
+        />
       </ul>
 
-      <div className="mt-6 flex gap-3">
+      <div className="cw-row" style={{ marginTop: 26 }}>
         {pitched > 0 && (
-          <button
-            onClick={() => router.push("/approvals")}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-          >
+          <button className="cw-btn cw-btn-primary" onClick={() => router.push("/approvals")}>
             Review the pitch
           </button>
         )}
         <button
-          onClick={() => router.push("/opportunities")}
-          className={`rounded-md px-4 py-2 text-sm font-medium ${
-            pitched > 0
-              ? "border border-zinc-300 dark:border-zinc-700"
-              : "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-          }`}
+          className={`cw-btn ${pitched > 0 ? "" : "cw-btn-primary"}`}
+          onClick={() => router.push("/overview")}
         >
-          See all {sourced} leads
+          Go to the dashboard
         </button>
+      </div>
+    </Frame>
+  );
+}
+
+function Outcome({
+  title,
+  note,
+  highlight,
+}: {
+  title: string;
+  note: string;
+  highlight?: boolean;
+}) {
+  return (
+    <li
+      className="cw-card-sm"
+      style={{
+        padding: 16,
+        borderColor: highlight ? "var(--orange-bd)" : "var(--rim)",
+        background: highlight ? "var(--orange-bg)" : "var(--glass)",
+      }}
+    >
+      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{title}</p>
+      <p style={{ margin: "6px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--dim)" }}>{note}</p>
+    </li>
+  );
+}
+
+/** Onboarding renders outside the app shell, so it brings its own. */
+function Frame({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ width: "100%", maxWidth: 720, margin: "0 auto", padding: "40px 0" }}>
+      <div className="cw-row" style={{ gap: 10, marginBottom: 28 }}>
+        <Logo size={24} />
+        <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.01em" }}>Clockwork</span>
+      </div>
+      <div className="cw-card cw-enter" style={{ padding: "clamp(22px, 4vw, 36px)" }}>
+        {children}
       </div>
     </div>
   );

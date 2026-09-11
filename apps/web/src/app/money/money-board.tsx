@@ -4,63 +4,23 @@ import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { api, type Deal, type Invoice, type Quote } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { createClient } from "@/lib/supabase/client";
+import { requireAccountClient } from "@/lib/account";
+import { Card, Empty, money } from "@/components/ui";
 
-function money(amount: number, currency: string) {
-  return `${currency} ${amount.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-const QUOTE_STATUS: Record<Quote["status"], string> = {
-  draft: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
-  sent: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
-  accepted: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  declined: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
-  expired: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+const QUOTE_TONE: Record<Quote["status"], string> = {
+  draft: "var(--quiet)",
+  sent: "var(--blue)",
+  accepted: "var(--ok)",
+  declined: "var(--quiet)",
+  expired: "var(--warn)",
 };
 
-const INVOICE_STATUS: Record<Invoice["status"], string> = {
-  draft: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
-  sent: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
-  paid: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  void: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+const INVOICE_TONE: Record<Invoice["status"], string> = {
+  draft: "var(--quiet)",
+  sent: "var(--blue)",
+  paid: "var(--ok)",
+  void: "var(--quiet)",
 };
-
-function Badge({ className, children }: { className: string; children: React.ReactNode }) {
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${className}`}>
-      {children}
-    </span>
-  );
-}
-
-function Action({
-  onClick,
-  disabled,
-  children,
-  tone = "default",
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-  tone?: "default" | "primary";
-}) {
-  const styles =
-    tone === "primary"
-      ? "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-      : "border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800";
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40 ${styles}`}
-    >
-      {children}
-    </button>
-  );
-}
 
 export function MoneyBoard({
   initialQuotes,
@@ -73,24 +33,16 @@ export function MoneyBoard({
 }) {
   const [quotes, setQuotes] = useState(initialQuotes);
   const [invoices, setInvoices] = useState(initialInvoices);
+  const [tab, setTab] = useState<"quotes" | "invoices">("quotes");
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = useMemo(() => createClient(), []);
-  const getToken = useCallback(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) throw new Error("Not signed in");
-    return session.access_token;
-  }, [supabase]);
-
   const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
 
-  // A deal is quotable once it has been qualified and doesn't already
-  // have a live quote. Showing them here rather than only on the Deals
-  // page keeps the whole money tail on one screen.
+  // A deal is quotable once it exists and does not already have a live
+  // quote. Listed here rather than only on the pipeline so the whole
+  // money tail sits on one screen.
   const quotable = useMemo(() => {
     const live = new Set(
       quotes.filter((q) => q.status === "draft" || q.status === "sent").map((q) => q.deal_id),
@@ -99,20 +51,19 @@ export function MoneyBoard({
   }, [deals, quotes]);
 
   const refresh = useCallback(async () => {
-    const token = await getToken();
-    const [q, i] = await Promise.all([api.listQuotes(token), api.listInvoices(token)]);
+    const account = requireAccountClient();
+    const [q, i] = await Promise.all([api.listQuotes(account), api.listInvoices(account)]);
     setQuotes(q);
     setInvoices(i);
-  }, [getToken]);
+  }, []);
 
   const run = useCallback(
-    async (key: string, fn: (token: string) => Promise<string | null>) => {
+    async (key: string, fn: (account: string) => Promise<string | null>) => {
       setBusy(key);
       setError(null);
       setNote(null);
       try {
-        const token = await getToken();
-        const message = await fn(token);
+        const message = await fn(requireAccountClient());
         if (message) setNote(message);
         await refresh();
       } catch (err) {
@@ -121,242 +72,321 @@ export function MoneyBoard({
         setBusy(null);
       }
     },
-    [getToken, refresh],
+    [refresh],
   );
 
-  const overdueTotal = invoices
-    .filter((i) => i.status === "sent" && i.due_at && new Date(i.due_at) < new Date())
+  const paid = invoices.filter((i) => i.status === "paid");
+  const outstanding = invoices
+    .filter((i) => i.status === "sent")
     .reduce((sum, i) => sum + i.amount, 0);
+  const collected = paid.reduce((sum, i) => sum + i.amount, 0);
+  const overdue = invoices.filter(
+    (i) => i.status === "sent" && i.due_at && new Date(i.due_at) < new Date(),
+  );
+  const currency = invoices[0]?.currency ?? quotes[0]?.currency ?? "USD";
 
   return (
-    <div className="mt-6 space-y-8">
-      {note && (
-        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-          {note}
-        </p>
-      )}
-      {error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-300">
-          {error}
-        </p>
-      )}
+    <>
+      <Card pad={26}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 36 }}>
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <div className="cw-kicker">Collected</div>
+            <div className="cw-num" style={{ marginTop: 16, fontSize: "clamp(28px, 4vw, 40px)" }}>
+              {money(collected, currency)}
+            </div>
+            <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--dim)" }}>
+              {paid.length} invoice{paid.length === 1 ? "" : "s"} paid
+            </p>
+          </div>
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <div className="cw-kicker">Outstanding</div>
+            <div
+              className="cw-num"
+              style={{
+                marginTop: 16,
+                fontSize: "clamp(28px, 4vw, 40px)",
+                color: overdue.length ? "var(--bad)" : "var(--ink)",
+              }}
+            >
+              {money(outstanding, currency)}
+            </div>
+            <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--dim)" }}>
+              {overdue.length
+                ? `${overdue.length} overdue`
+                : outstanding > 0
+                  ? "none overdue yet"
+                  : "nothing owed"}
+            </p>
+          </div>
+        </div>
+      </Card>
 
-      {/* ── deals waiting to be priced ───────────────────────────────── */}
-      {quotable.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Ready to quote
-          </h2>
-          <ul className="mt-3 divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-            {quotable.map((deal) => (
-              <li key={deal.id} className="flex items-center gap-3 px-4 py-3">
-                <Link href={`/threads/${deal.thread_id}`} className="flex-1 text-sm hover:underline">
-                  {deal.intent ?? "Untitled deal"}
-                </Link>
-                <span className="text-xs capitalize text-zinc-500 dark:text-zinc-400">
-                  {deal.stage}
-                </span>
-                <Action
-                  tone="primary"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    run(`quote-${deal.id}`, async (token) => {
-                      const result = await api.quoteDeal(token, deal.id);
-                      return `Quote drafted for ${money(result.total, result.currency)} — waiting in the Approval Inbox.`;
-                    })
-                  }
-                >
-                  {busy === `quote-${deal.id}` ? "Pricing…" : "Draft quote"}
-                </Action>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {note && <p style={{ margin: 0, fontSize: 13, color: "var(--ok)" }}>{note}</p>}
+      {error && <p style={{ margin: 0, fontSize: 13, color: "var(--bad)" }}>{error}</p>}
 
-      {/* ── quotes ───────────────────────────────────────────────────── */}
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      <div className="cw-seg" style={{ alignSelf: "flex-start" }}>
+        <button data-on={tab === "quotes"} onClick={() => setTab("quotes")}>
           Quotes
-        </h2>
-        {quotes.length === 0 ? (
-          <p className="mt-3 rounded-lg border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            No quotes yet.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-3">
-            {quotes.map((quote) => {
+        </button>
+        <button data-on={tab === "invoices"} onClick={() => setTab("invoices")}>
+          Invoices
+        </button>
+      </div>
+
+      {tab === "quotes" && (
+        <div className="cw-stack">
+          {quotable.length > 0 && (
+            <div className="cw-dashed" style={{ padding: 22 }}>
+              <div className="cw-label">Ready to quote</div>
+              <ul style={{ listStyle: "none", margin: "14px 0 0", padding: 0 }}>
+                {quotable.map((deal) => (
+                  <li
+                    key={deal.id}
+                    className="cw-row"
+                    style={{ padding: "10px 0", borderTop: "1px solid var(--rim)" }}
+                  >
+                    <Link
+                      href={`/threads/${deal.thread_id}`}
+                      style={{ flex: "1 1 220px", fontSize: 14, fontWeight: 600, minWidth: 0 }}
+                    >
+                      {deal.intent ?? "Untitled deal"}
+                    </Link>
+                    <span className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)" }}>
+                      {deal.stage}
+                    </span>
+                    <button
+                      className="cw-btn cw-btn-sm cw-btn-primary"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        run(`quote-${deal.id}`, async (account) => {
+                          const result = await api.quoteDeal(account, deal.id);
+                          return `Quote drafted for ${money(result.total, result.currency)} — waiting in the Approval Inbox.`;
+                        })
+                      }
+                    >
+                      {busy === `quote-${deal.id}` ? "Pricing…" : "Draft quote"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {quotes.length === 0 ? (
+            <Empty title="No quotes yet">
+              A quote is priced off your rate card once a deal is worth pricing. The model proposes
+              line items; the totals are computed in code.
+            </Empty>
+          ) : (
+            quotes.map((quote) => {
               const deal = dealById.get(quote.deal_id);
               const invoiced = invoices.some((i) => i.quote_id === quote.id && i.status !== "void");
               return (
-                <li
-                  key={quote.id}
-                  className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
-                >
-                  <div className="flex flex-wrap items-baseline gap-3">
-                    <span className="font-medium">{money(quote.total, quote.currency)}</span>
-                    <Badge className={QUOTE_STATUS[quote.status]}>{quote.status}</Badge>
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                      {deal?.intent ?? "—"}
+                <article key={quote.id} className="cw-card" style={{ padding: 24 }}>
+                  <div className="cw-row" style={{ alignItems: "baseline", gap: 14 }}>
+                    <span className="cw-num" style={{ fontSize: 26 }}>
+                      {money(quote.total, quote.currency)}
                     </span>
-                    <span className="ml-auto text-xs text-zinc-400">
+                    <span className="cw-status" style={{ color: QUOTE_TONE[quote.status] }}>
+                      {quote.status}
+                    </span>
+                    <span
+                      className="cw-mono"
+                      style={{ marginLeft: "auto", fontSize: 11, color: "var(--quiet)" }}
+                    >
                       {quote.valid_until
                         ? `valid until ${formatDate(quote.valid_until)}`
                         : formatDate(quote.created_at)}
                     </span>
                   </div>
 
-                  <ul className="mt-3 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
-                    {quote.line_items.map((item, index) => (
-                      <li key={index} className="flex gap-3">
-                        <span className="flex-1">{item.description}</span>
-                        <span className="tabular-nums">{money(item.amount, quote.currency)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {quote.timeline && (
-                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                      Timeline: {quote.timeline}
+                  {deal?.intent && (
+                    <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--dim)" }}>
+                      {deal.intent}
                     </p>
                   )}
 
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <ul style={{ listStyle: "none", margin: "20px 0 0", padding: 0, fontSize: 13.5 }}>
+                    {quote.line_items.map((item, index) => (
+                      <li
+                        key={index}
+                        style={{
+                          display: "flex",
+                          gap: 16,
+                          padding: "11px 0",
+                          borderBottom:
+                            index === quote.line_items.length - 1 ? "none" : "1px solid var(--rim)",
+                        }}
+                      >
+                        <span style={{ flex: 1, color: "var(--dim)" }}>
+                          {item.description}
+                          {item.quantity !== 1 || item.unit !== "project" ? (
+                            <span className="cw-mono" style={{ color: "var(--quiet)" }}>
+                              {" — "}
+                              {item.quantity}
+                              {item.unit === "hour" ? "h" : ` ${item.unit}`}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="cw-mono" style={{ flex: "none" }}>
+                          {item.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <p
+                    className="cw-mono"
+                    style={{ margin: "16px 0 0", fontSize: 11, color: "var(--quiet)" }}
+                  >
+                    {quote.timeline ? `${quote.timeline} · ` : ""}totals computed in code
+                  </p>
+
+                  <div className="cw-row" style={{ gap: 9, marginTop: 22 }}>
                     {quote.status === "draft" && (
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      <span style={{ fontSize: 12.5, color: "var(--quiet)" }}>
                         Waiting in the Approval Inbox — nothing has been sent.
                       </span>
                     )}
                     {quote.status === "sent" && (
                       <>
-                        <Action
-                          tone="primary"
+                        <button
+                          className="cw-btn cw-btn-primary"
                           disabled={busy !== null}
                           onClick={() =>
-                            run(`accept-${quote.id}`, async (token) => {
-                              await api.acceptQuote(token, quote.id);
+                            run(`accept-${quote.id}`, async (account) => {
+                              await api.acceptQuote(account, quote.id);
                               return "Marked accepted. You can raise the invoice now.";
                             })
                           }
                         >
                           Client accepted
-                        </Action>
-                        <Action
+                        </button>
+                        <button
+                          className="cw-btn"
                           disabled={busy !== null}
                           onClick={() =>
-                            run(`decline-${quote.id}`, async (token) => {
-                              await api.declineQuote(token, quote.id);
+                            run(`decline-${quote.id}`, async (account) => {
+                              await api.declineQuote(account, quote.id);
                               return "Marked declined; the deal is closed as lost.";
                             })
                           }
                         >
                           Client declined
-                        </Action>
+                        </button>
                       </>
                     )}
                     {quote.status === "accepted" &&
                       (invoiced ? (
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                          Invoiced.
-                        </span>
+                        <span style={{ fontSize: 12.5, color: "var(--quiet)" }}>Invoiced.</span>
                       ) : (
-                        <Action
-                          tone="primary"
+                        <button
+                          className="cw-btn cw-btn-primary"
                           disabled={busy !== null}
                           onClick={() =>
-                            run(`invoice-${quote.id}`, async (token) => {
-                              const result = await api.invoiceQuote(token, quote.id);
+                            run(`invoice-${quote.id}`, async (account) => {
+                              const result = await api.invoiceQuote(account, quote.id);
                               return `Invoice ${result.number} drafted — waiting in the Approval Inbox.`;
                             })
                           }
                         >
                           {busy === `invoice-${quote.id}` ? "Raising…" : "Raise invoice"}
-                        </Action>
+                        </button>
                       ))}
                   </div>
-                </li>
+                </article>
               );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* ── invoices ─────────────────────────────────────────────────── */}
-      <section>
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Invoices
-          </h2>
-          {overdueTotal > 0 && (
-            <span className="text-xs text-red-700 dark:text-red-400">
-              {money(overdueTotal, invoices[0]?.currency ?? "USD")} overdue
-            </span>
+            })
           )}
         </div>
-        {invoices.length === 0 ? (
-          <p className="mt-3 rounded-lg border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            No invoices yet.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-3">
-            {invoices.map((invoice) => {
-              const overdue =
+      )}
+
+      {tab === "invoices" && (
+        <div className="cw-stack">
+          {invoices.length === 0 ? (
+            <Empty title="No invoices yet">
+              An invoice can only be raised once a human records that the client accepted the quote.
+              The agent has no tool that decides that for you.
+            </Empty>
+          ) : (
+            invoices.map((invoice) => {
+              const isOverdue =
                 invoice.status === "sent" &&
                 invoice.due_at != null &&
                 new Date(invoice.due_at) < new Date();
               return (
-                <li
-                  key={invoice.id}
-                  className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
-                >
-                  <div className="flex flex-wrap items-baseline gap-3">
-                    <span className="font-mono text-sm">{invoice.number}</span>
-                    <span className="font-medium">{money(invoice.amount, invoice.currency)}</span>
-                    <Badge className={INVOICE_STATUS[invoice.status]}>{invoice.status}</Badge>
-                    {overdue && (
-                      <span className="text-xs font-medium text-red-700 dark:text-red-400">
-                        overdue
-                      </span>
-                    )}
-                    <span className="ml-auto text-xs text-zinc-400">
+                <article key={invoice.id} className="cw-card" style={{ padding: 24 }}>
+                  <div className="cw-row" style={{ alignItems: "baseline", gap: 14 }}>
+                    <span className="cw-mono" style={{ fontSize: 12, color: "var(--quiet)" }}>
+                      {invoice.number}
+                    </span>
+                    <span className="cw-num" style={{ fontSize: 26 }}>
+                      {money(invoice.amount, invoice.currency)}
+                    </span>
+                    <span
+                      className="cw-status"
+                      style={{ color: isOverdue ? "var(--bad)" : INVOICE_TONE[invoice.status] }}
+                    >
+                      {isOverdue ? "overdue" : invoice.status}
+                    </span>
+                    <span
+                      className="cw-mono"
+                      style={{ marginLeft: "auto", fontSize: 11, color: "var(--quiet)" }}
+                    >
                       {invoice.due_at ? `due ${formatDate(invoice.due_at)}` : "no due date"}
                     </span>
                   </div>
 
                   {invoice.chase_count > 0 && (
-                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <p
+                      style={{
+                        margin: "14px 0 0",
+                        fontSize: 13.5,
+                        lineHeight: 1.6,
+                        color: "var(--sub)",
+                        maxWidth: "58ch",
+                      }}
+                    >
                       {invoice.chase_count} reminder{invoice.chase_count === 1 ? "" : "s"} sent
-                      {invoice.last_chased_at ? `, last on ${formatDate(invoice.last_chased_at)}` : ""}.
+                      {invoice.last_chased_at
+                        ? `, last on ${formatDate(invoice.last_chased_at)}`
+                        : ""}
+                      .
+                      {invoice.chase_count >= 2
+                        ? " The next one names the overdue period and asks for a payment date."
+                        : ""}
                     </p>
                   )}
 
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="cw-row" style={{ gap: 9, marginTop: 22 }}>
                     {invoice.status === "draft" && (
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      <span style={{ fontSize: 12.5, color: "var(--quiet)" }}>
                         Waiting in the Approval Inbox — nothing has been sent.
                       </span>
                     )}
                     {invoice.status === "sent" && (
                       <>
-                        <Action
-                          tone="primary"
+                        <button
+                          className="cw-btn cw-btn-primary"
                           disabled={busy !== null}
                           onClick={() =>
-                            run(`paid-${invoice.id}`, async (token) => {
-                              await api.markInvoicePaid(token, invoice.id);
+                            run(`paid-${invoice.id}`, async (account) => {
+                              await api.markInvoicePaid(account, invoice.id);
                               return `${invoice.number} marked paid — the chase is cancelled and the deal is won.`;
                             })
                           }
                         >
                           Mark paid
-                        </Action>
-                        <Action
+                        </button>
+                        <button
+                          className="cw-btn"
                           disabled={busy !== null}
                           onClick={() =>
-                            run(`chase-${invoice.id}`, async (token) => {
-                              const result = await api.chaseInvoice(token, invoice.id);
-                              // "Nothing to chase" is a real, correct
-                              // answer here -- surface it as such rather
-                              // than leaving the button looking broken.
+                            run(`chase-${invoice.id}`, async (account) => {
+                              const result = await api.chaseInvoice(account, invoice.id);
+                              // "Nothing to chase" is a real, correct answer
+                              // -- surface it rather than leaving the button
+                              // looking broken.
                               return result.action === "none"
                                 ? `Nothing to chase: ${result.reason}.`
                                 : `Reminder drafted (${result.days_overdue} days overdue) — waiting in the Approval Inbox.`;
@@ -364,21 +394,21 @@ export function MoneyBoard({
                           }
                         >
                           {busy === `chase-${invoice.id}` ? "Drafting…" : "Chase now"}
-                        </Action>
+                        </button>
                       </>
                     )}
                     {invoice.status === "paid" && invoice.paid_at && (
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      <span style={{ fontSize: 12.5, color: "var(--quiet)" }}>
                         Paid {formatDate(invoice.paid_at)}.
                       </span>
                     )}
                   </div>
-                </li>
+                </article>
               );
-            })}
-          </ul>
-        )}
-      </section>
-    </div>
+            })
+          )}
+        </div>
+      )}
+    </>
   );
 }

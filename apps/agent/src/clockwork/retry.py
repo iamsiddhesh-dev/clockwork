@@ -1,12 +1,10 @@
 """Retry-with-backoff for transient model-call failures.
 
-Bedrock calls go through botocore, which already retries on throttling.
-Groq/LiteLLM does not -- confirmed against Groq's own rate-limits docs
-(Aug 18): a 429 comes back with a `retry-after` header and the caller is
-expected to implement its own backoff. `call_with_retry` is that backoff,
-used by every Agent(...) invocation (`ledger.invoke_model`, `agent.py`'s
-orchestrator call) regardless of which provider is active -- a no-op
-extra try/except on Bedrock, load-bearing on Groq.
+LiteLLM does not retry throttling for us -- confirmed against Groq's own
+rate-limits docs (Aug 18): a 429 comes back with a `retry-after` header
+and the caller is expected to implement its own backoff. `call_with_retry`
+is that backoff, used by every Agent(...) invocation
+(`ledger.invoke_model`, `agent.py`'s orchestrator call).
 
 **Why the exception-chain walk matters.** Strands does not let the
 provider's exception through untouched: `agent(...)` raises

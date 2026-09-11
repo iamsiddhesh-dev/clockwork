@@ -1,52 +1,71 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import { requireAccessToken } from "@/lib/supabase/session";
+import { requireAccount } from "@/lib/account-server";
+import { ApiDown, Empty, PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function ThreadsPage() {
-  const accessToken = await requireAccessToken();
-  const threads = await api.listThreads(accessToken).catch(() => []);
+  const account = await requireAccount();
+  const threads = await api.listThreads(account).catch(() => null);
+  if (!threads) return <ApiDown what="Threads" />;
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Threads</h1>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Every conversation Clockwork is tracking.
-      </p>
+    <>
+      <PageHead
+        kicker="Threads"
+        title="Every conversation it is tracking"
+        aside={
+          <p className="cw-mono" style={{ margin: 0, fontSize: 11, color: "var(--quiet)" }}>
+            {threads.length} thread{threads.length === 1 ? "" : "s"}
+          </p>
+        }
+      />
 
       {threads.length === 0 ? (
-        <div className="mt-6 rounded-lg border border-dashed border-zinc-300 py-16 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          No threads yet.
-        </div>
+        <Empty title="No conversations yet">
+          A thread appears when a lead arrives through the intake form, or when you approve an
+          outbound pitch and it becomes a real client relationship.
+        </Empty>
       ) : (
-        <ul className="mt-6 flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-          {threads.map((thread) => (
-            <li key={thread.id}>
-              <Link
-                href={`/threads/${thread.id}`}
-                className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60"
-              >
-                <div>
-                  <p className="font-medium">{thread.contact_name ?? "Unknown contact"}</p>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    {thread.contact_email ?? "no email"} · {thread.channel}
-                  </p>
+        <div className="cw-card" style={{ overflow: "hidden" }}>
+          {threads.map((thread, index) => (
+            <Link
+              key={thread.id}
+              href={`/threads/${thread.id}`}
+              className="cw-row"
+              style={{
+                gap: 12,
+                padding: "16px 20px",
+                borderBottom: index === threads.length - 1 ? "none" : "1px solid var(--rim)",
+              }}
+            >
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>
+                  {thread.contact_name ?? "Unknown contact"}
                 </div>
-                <div className="text-right text-xs text-zinc-400">
-                  <p className={thread.status === "open" ? "text-emerald-600 dark:text-emerald-400" : ""}>
-                    {thread.status}
-                  </p>
-                  <p>
-                    {thread.last_message_at ? formatDateTime(thread.last_message_at) : "no messages"}
-                  </p>
+                <div className="cw-mono" style={{ marginTop: 5, fontSize: 11, color: "var(--quiet)" }}>
+                  {thread.contact_email ?? "no email on file"} · {thread.channel}
                 </div>
-              </Link>
-            </li>
+              </div>
+              <div style={{ flex: "none", textAlign: "right" }}>
+                <span
+                  className="cw-status"
+                  style={{ color: thread.status === "open" ? "var(--ok)" : "var(--quiet)" }}
+                >
+                  {thread.status}
+                </span>
+                <div className="cw-mono" style={{ marginTop: 6, fontSize: 11, color: "var(--quiet)" }}>
+                  {thread.last_message_at
+                    ? formatDateTime(thread.last_message_at)
+                    : "no messages"}
+                </div>
+              </div>
+            </Link>
           ))}
-        </ul>
+        </div>
       )}
-    </div>
+    </>
   );
 }

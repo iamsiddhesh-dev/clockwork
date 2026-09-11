@@ -1,26 +1,43 @@
 import { api } from "@/lib/api";
-import { requireAccessToken } from "@/lib/supabase/session";
+import { requireAccount } from "@/lib/account-server";
+import { ApiDown, PageHead } from "@/components/ui";
 import { MoneyBoard } from "./money-board";
 
 export const dynamic = "force-dynamic";
 
 export default async function MoneyPage() {
-  const accessToken = await requireAccessToken();
+  const account = await requireAccount();
 
   const [quotes, invoices, deals] = await Promise.all([
-    api.listQuotes(accessToken).catch(() => []),
-    api.listInvoices(accessToken).catch(() => []),
-    api.listDeals(accessToken).catch(() => []),
+    api.listQuotes(account).catch(() => null),
+    api.listInvoices(account).catch(() => null),
+    api.listDeals(account).catch(() => null),
   ]);
 
+  if (!quotes || !invoices || !deals) return <ApiDown what="Quotes and invoices" />;
+
   return (
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Money</h1>
-      <p className="mt-1 max-w-2xl text-sm text-zinc-500 dark:text-zinc-400">
-        Quote, invoice, and chase. The agent writes and schedules all three; you decide what the
-        client actually said. Nothing here can mark itself accepted or paid.
-      </p>
+    <>
+      <PageHead
+        kicker="Money"
+        title="Quote, invoice, chase"
+        aside={
+          <p
+            style={{
+              margin: 0,
+              flex: "1 1 280px",
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: "var(--dim)",
+              maxWidth: "44ch",
+            }}
+          >
+            The agent writes and schedules all three. You decide what the client actually said
+            &mdash; nothing here can mark itself accepted or paid.
+          </p>
+        }
+      />
       <MoneyBoard initialQuotes={quotes} initialInvoices={invoices} deals={deals} />
-    </div>
+    </>
   );
 }

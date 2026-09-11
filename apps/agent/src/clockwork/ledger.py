@@ -2,7 +2,7 @@
 
 Every model call an agent run makes should go through `record_usage` (or,
 for the orchestrator, through `resolve_role` first so a breached cap
-degrades the role to Nova *before* the call is made). Verified against
+degrades the role *before* the call is made). Verified against
 strands-agents 1.52.0: `AgentResult.metrics.accumulated_usage` is a
 `Usage` TypedDict with `inputTokens` / `outputTokens` / `totalTokens`.
 """
@@ -68,8 +68,9 @@ def spent_today_usd(user_id: str) -> float:
 def resolve_role(user_id: str, role: Role, run_id: str | None = None) -> Role:
     """Return the role to actually use for this call: `role` unless the
     daily spend cap has been breached, in which case the orchestrator
-    silently degrades to Nova Pro (writer). Writes a `decision` agent_event
-    when it degrades, so the video can show the guard firing."""
+    silently degrades to the writer's smaller, cheaper model. Writes a
+    `decision` agent_event when it degrades, so the guard firing is
+    visible in the Run Trace rather than being a silent quality drop."""
     if role is not Role.ORCHESTRATOR:
         return role
 
@@ -87,7 +88,7 @@ def resolve_role(user_id: str, role: Role, run_id: str | None = None) -> Role:
             kind="decision",
             rationale=(
                 f"Daily spend cap (${cap:.2f}) reached (${spent:.2f} spent today) -- "
-                "degrading orchestrator reasoning from Claude Sonnet 5 to Amazon Nova Pro."
+                "degrading orchestrator reasoning to the smaller writer model."
             ),
         )
     return Role.WRITER
@@ -172,7 +173,7 @@ def invoke_model(
     """Run one model call under the given role, honouring the daily spend
     cap (orchestrator only) and recording usage to the ledger. This is the
     only path tools should use to call a model -- never build a
-    `BedrockModel` / `Agent` directly inside a tool."""
+    `get_model` / `Agent` directly inside a tool."""
     user_id = current_user_id()
     run_id = current_run_id()
 

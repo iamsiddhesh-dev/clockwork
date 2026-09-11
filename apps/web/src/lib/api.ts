@@ -1,8 +1,15 @@
 /**
- * Thin client for the Clockwork agent API (apps/agent). Every call needs
- * the caller's Supabase access token -- the backend verifies it and
- * derives user_id from it (see apps/agent/src/clockwork/auth.py); there
- * is no more client-supplied user_id anywhere in this file.
+ * Thin client for the Clockwork agent API (apps/agent).
+ *
+ * Every call takes the caller's workspace id as its first argument and
+ * sends it as `X-Clockwork-Account`. There is no sign-in and no token:
+ * the id comes from a cookie set during onboarding (see lib/account.ts),
+ * and apps/agent's auth.py resolves it -- and is explicit that this
+ * identifies a workspace rather than authenticating a person.
+ *
+ * The first parameter is still named `account` everywhere rather than
+ * being threaded through some context, so it stays obvious at each call
+ * site that a request is scoped to one workspace.
  */
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -70,6 +77,8 @@ export type Profile = {
   id?: string;
   user_id?: string;
   name: string;
+  /** Contact data, not a credential -- nothing signs in with it. */
+  email: string | null;
   skills: string[];
   rates: { hourly?: number; currency?: string; [key: string]: unknown };
   positioning: string | null;
@@ -178,6 +187,71 @@ export type ChaseResult =
       body: string;
     };
 
+export type Summary = {
+  now: string;
+  pending_approvals: number;
+  running: boolean;
+  spent_today_usd: number;
+  daily_cap_usd: number;
+  pending_tasks: number;
+  next_task: { kind: string; due_at: string; reason: string | null } | null;
+};
+
+export type Workflow = {
+  key: string;
+  name: string;
+  blurb: string;
+  tools: string[];
+  state: string;
+  tone: "pending" | "done" | "idle";
+  waiting: number;
+  last_at: string | null;
+  /** What the lane actually produced -- opportunities, pitches, quotes,
+   *  reminders. Counted from domain rows, not from the event log. */
+  produced: number;
+  calls: number;
+  cost_usd: number;
+};
+
+export type Overview = {
+  summary: Summary;
+  metrics: {
+    opportunities_scored: number;
+    opportunities_strong: number;
+    opportunities_total: number;
+    pending_approvals: number;
+    quotes_out: number;
+    quotes_accepted: number;
+    outstanding_usd: number;
+    collected_usd: number;
+    overdue_count: number;
+    avg_days_to_paid: number | null;
+  };
+  runs: {
+    total: number;
+    success_rate: number | null;
+    last_at: string | null;
+    recent: AgentRun[];
+  };
+  workflows: Workflow[];
+  activity: {
+    id: string;
+    run_id: string;
+    kind: string;
+    tool: string | null;
+    text: string;
+    cost_usd: number | null;
+    at: string;
+  }[];
+  cost_series: { day: string; usd: number }[];
+  scheduled: {
+    kind: string;
+    subject_type: string;
+    due_at: string;
+    reason: string | null;
+  }[];
+};
+
 export type AgentRun = {
   id: string;
   user_id: string;
@@ -207,12 +281,12 @@ export type AgentEvent = {
   created_at: string;
 };
 
-async function apiFetch<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, account: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
+      "X-Clockwork-Account": account,
       ...init?.headers,
     },
   });
@@ -225,102 +299,107 @@ async function apiFetch<T>(path: string, accessToken: string, init?: RequestInit
 }
 
 export const api = {
-  listApprovals: (accessToken: string, status = "pending") =>
-    apiFetch<Approval[]>(`/approvals?status=${status}`, accessToken, { cache: "no-store" }),
-  approve: (accessToken: string, id: string) =>
-    apiFetch<{ status: string }>(`/approvals/${id}/approve`, accessToken, { method: "POST" }),
-  reject: (accessToken: string, id: string) =>
-    apiFetch<{ status: string }>(`/approvals/${id}/reject`, accessToken, { method: "POST" }),
-  editApproval: (accessToken: string, id: string, payload: Record<string, unknown>) =>
-    apiFetch<Approval>(`/approvals/${id}`, accessToken, {
+  listApprovals: (account: string, status = "pending") =>
+    apiFetch<Approval[]>(`/approvals?status=${status}`, account, { cache: "no-store" }),
+  approve: (account: string, id: string) =>
+    apiFetch<{ status: string }>(`/approvals/${id}/approve`, account, { method: "POST" }),
+  reject: (account: string, id: string) =>
+    apiFetch<{ status: string }>(`/approvals/${id}/reject`, account, { method: "POST" }),
+  editApproval: (account: string, id: string, payload: Record<string, unknown>) =>
+    apiFetch<Approval>(`/approvals/${id}`, account, {
       method: "PATCH",
       body: JSON.stringify({ payload }),
     }),
 
-  listThreads: (accessToken: string) =>
-    apiFetch<Thread[]>(`/threads`, accessToken, { cache: "no-store" }),
-  getThread: (accessToken: string, id: string) =>
-    apiFetch<{ thread: Thread; messages: Message[]; deal: Deal | null }>(`/threads/${id}`, accessToken, {
+  listThreads: (account: string) =>
+    apiFetch<Thread[]>(`/threads`, account, { cache: "no-store" }),
+  getThread: (account: string, id: string) =>
+    apiFetch<{ thread: Thread; messages: Message[]; deal: Deal | null }>(`/threads/${id}`, account, {
       cache: "no-store",
     }),
 
-  listDeals: (accessToken: string) => apiFetch<Deal[]>(`/deals`, accessToken, { cache: "no-store" }),
-  quoteDeal: (accessToken: string, dealId: string) =>
+  summary: (account: string) =>
+    apiFetch<Summary>(`/summary`, account, { cache: "no-store" }),
+  overview: (account: string) =>
+    apiFetch<Overview>(`/overview`, account, { cache: "no-store" }),
+
+  listDeals: (account: string) => apiFetch<Deal[]>(`/deals`, account, { cache: "no-store" }),
+  quoteDeal: (account: string, dealId: string) =>
     apiFetch<{ approval_id: string; quote_id: string; total: number; currency: string; body: string }>(
       `/deals/${dealId}/quote`,
-      accessToken,
+      account,
       { method: "POST" },
     ),
 
-  listQuotes: (accessToken: string) =>
-    apiFetch<Quote[]>(`/quotes`, accessToken, { cache: "no-store" }),
+  listQuotes: (account: string) =>
+    apiFetch<Quote[]>(`/quotes`, account, { cache: "no-store" }),
   /** Human-only: the agent has no tool for these three. */
-  acceptQuote: (accessToken: string, id: string) =>
-    apiFetch<Quote>(`/quotes/${id}/accepted`, accessToken, { method: "POST" }),
-  declineQuote: (accessToken: string, id: string) =>
-    apiFetch<Quote>(`/quotes/${id}/declined`, accessToken, { method: "POST" }),
-  invoiceQuote: (accessToken: string, id: string) =>
+  acceptQuote: (account: string, id: string) =>
+    apiFetch<Quote>(`/quotes/${id}/accepted`, account, { method: "POST" }),
+  declineQuote: (account: string, id: string) =>
+    apiFetch<Quote>(`/quotes/${id}/declined`, account, { method: "POST" }),
+  invoiceQuote: (account: string, id: string) =>
     apiFetch<{ approval_id: string; invoice_id: string; number: string; body: string }>(
       `/quotes/${id}/invoice`,
-      accessToken,
+      account,
       { method: "POST" },
     ),
 
-  listInvoices: (accessToken: string) =>
-    apiFetch<Invoice[]>(`/invoices`, accessToken, { cache: "no-store" }),
-  markInvoicePaid: (accessToken: string, id: string) =>
-    apiFetch<Invoice>(`/invoices/${id}/paid`, accessToken, { method: "POST" }),
-  chaseInvoice: (accessToken: string, id: string) =>
-    apiFetch<ChaseResult>(`/invoices/${id}/chase`, accessToken, { method: "POST" }),
+  listInvoices: (account: string) =>
+    apiFetch<Invoice[]>(`/invoices`, account, { cache: "no-store" }),
+  markInvoicePaid: (account: string, id: string) =>
+    apiFetch<Invoice>(`/invoices/${id}/paid`, account, { method: "POST" }),
+  chaseInvoice: (account: string, id: string) =>
+    apiFetch<ChaseResult>(`/invoices/${id}/chase`, account, { method: "POST" }),
 
-  listOpportunities: (accessToken: string) =>
-    apiFetch<Opportunity[]>(`/opportunities`, accessToken, { cache: "no-store" }),
-  listSources: (accessToken: string) =>
-    apiFetch<Source[]>(`/sources`, accessToken, { cache: "no-store" }),
-  syncOpportunities: (accessToken: string) =>
-    apiFetch<SyncReport>(`/opportunities/sync`, accessToken, { method: "POST" }),
-  scoreOpportunities: (accessToken: string, limit = 10) =>
-    apiFetch<{ scored: number; failed: number }>(`/opportunities/score`, accessToken, {
+  listOpportunities: (account: string) =>
+    apiFetch<Opportunity[]>(`/opportunities`, account, { cache: "no-store" }),
+  listSources: (account: string) =>
+    apiFetch<Source[]>(`/sources`, account, { cache: "no-store" }),
+  syncOpportunities: (account: string) =>
+    apiFetch<SyncReport>(`/opportunities/sync`, account, { method: "POST" }),
+  scoreOpportunities: (account: string, limit = 10) =>
+    apiFetch<{ scored: number; failed: number }>(`/opportunities/score`, account, {
       method: "POST",
       body: JSON.stringify({ limit }),
     }),
-  pitchOpportunity: (accessToken: string, id: string) =>
+  pitchOpportunity: (account: string, id: string) =>
     apiFetch<{ approval_id: string; opportunity_id: string; body: string }>(
       `/opportunities/${id}/pitch`,
-      accessToken,
+      account,
       { method: "POST" },
     ),
   /** Onboarding's one call: source, score, and pitch the best match. */
-  kickoff: (accessToken: string, scoreLimit = 10, pitchTop = 1) =>
-    apiFetch<KickoffResult>(`/kickoff`, accessToken, {
+  kickoff: (account: string, scoreLimit = 10, pitchTop = 1) =>
+    apiFetch<KickoffResult>(`/kickoff`, account, {
       method: "POST",
       body: JSON.stringify({ score_limit: scoreLimit, pitch_top: pitchTop }),
     }),
-  dismissOpportunity: (accessToken: string, id: string) =>
-    apiFetch<Opportunity>(`/opportunities/${id}/dismiss`, accessToken, { method: "POST" }),
+  dismissOpportunity: (account: string, id: string) =>
+    apiFetch<Opportunity>(`/opportunities/${id}/dismiss`, account, { method: "POST" }),
 
-  getProfile: (accessToken: string) =>
-    apiFetch<Profile | null>(`/profile`, accessToken, { cache: "no-store" }),
-  saveProfile: (accessToken: string, profile: Omit<Profile, "id" | "user_id">) =>
-    apiFetch<Profile>(`/profile`, accessToken, { method: "PUT", body: JSON.stringify(profile) }),
+  getProfile: (account: string) =>
+    apiFetch<Profile | null>(`/profile`, account, { cache: "no-store" }),
+  saveProfile: (account: string, profile: Omit<Profile, "id" | "user_id">) =>
+    apiFetch<Profile>(`/profile`, account, { method: "PUT", body: JSON.stringify(profile) }),
 
-  listRuns: (accessToken: string, limit = 30) =>
-    apiFetch<AgentRun[]>(`/runs?limit=${limit}`, accessToken, { cache: "no-store" }),
-  getRun: (accessToken: string, id: string) =>
-    apiFetch<AgentRun>(`/runs/${id}`, accessToken, { cache: "no-store" }),
+  listRuns: (account: string, limit = 30) =>
+    apiFetch<AgentRun[]>(`/runs?limit=${limit}`, account, { cache: "no-store" }),
+  getRun: (account: string, id: string) =>
+    apiFetch<AgentRun>(`/runs/${id}`, account, { cache: "no-store" }),
 
-  /** Not an apiFetch call -- EventSource can't send an Authorization
-   * header, so the token rides in the query string instead (matches
+  /** Not an apiFetch call -- EventSource can't send custom headers, so
+   * the workspace id rides in the query string instead (matches
    * apps/agent's /runs/{id}/events route). */
-  runEventsUrl: (accessToken: string, runId: string) =>
-    `${API_URL}/runs/${runId}/events?token=${encodeURIComponent(accessToken)}`,
+  runEventsUrl: (account: string, runId: string) =>
+    `${API_URL}/runs/${runId}/events?account=${encodeURIComponent(account)}`,
 
-  clock: (accessToken: string) => apiFetch<{ now: string }>(`/clock`, accessToken, { cache: "no-store" }),
-  advanceClock: (accessToken: string, days: number) =>
-    apiFetch<{ now: string; fired: unknown[] }>(`/clock/advance`, accessToken, {
+  clock: (account: string) => apiFetch<{ now: string }>(`/clock`, account, { cache: "no-store" }),
+  advanceClock: (account: string, days: number) =>
+    apiFetch<{ now: string; fired: unknown[] }>(`/clock/advance`, account, {
       method: "POST",
       body: JSON.stringify({ days }),
     }),
-  resetClock: (accessToken: string) =>
-    apiFetch<{ now: string }>(`/clock/reset`, accessToken, { method: "POST" }),
+  resetClock: (account: string) =>
+    apiFetch<{ now: string }>(`/clock/reset`, account, { method: "POST" }),
 };

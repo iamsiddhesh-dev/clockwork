@@ -2,46 +2,120 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, type AgentEvent } from "@/lib/api";
-import { createClient } from "@/lib/supabase/client";
+import { readAccount } from "@/lib/account";
+import { Empty } from "@/components/ui";
 
-const KIND_STYLES: Record<string, string> = {
-  tool_call: "border-sky-200 dark:border-sky-900",
-  tool_result: "border-emerald-200 dark:border-emerald-900",
-  decision: "border-amber-200 dark:border-amber-900",
-  error: "border-red-200 dark:border-red-900",
-  model_call: "border-violet-200 dark:border-violet-900",
+const KIND: Record<string, { dot: string; label: string; weight: number }> = {
+  model_call: { dot: "var(--quiet)", label: "model call", weight: 500 },
+  tool_call: { dot: "var(--blue)", label: "called", weight: 600 },
+  tool_result: { dot: "var(--ok)", label: "returned", weight: 500 },
+  decision: { dot: "var(--orange)", label: "decision", weight: 600 },
+  error: { dot: "var(--bad)", label: "error", weight: 600 },
 };
 
-const KIND_LABELS: Record<string, string> = {
-  tool_call: "called",
-  tool_result: "returned",
-  decision: "decision",
-  error: "error",
-  model_call: "model call",
-};
+function timeOf(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
 
-function EventCard({ event }: { event: AgentEvent }) {
+function Event({ event, last }: { event: AgentEvent; last: boolean }) {
+  const kind = KIND[event.kind] ?? { dot: "var(--quiet)", label: event.kind, weight: 500 };
   const hasPayload = event.payload && Object.keys(event.payload).length > 0;
 
   return (
-    <li className={`rounded-lg border p-3 text-sm ${KIND_STYLES[event.kind] ?? "border-zinc-200 dark:border-zinc-800"}`}>
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-mono text-xs uppercase tracking-wide text-zinc-400">
-          #{event.seq} · {KIND_LABELS[event.kind] ?? event.kind}
-        </span>
-        <span className="flex items-center gap-2 text-xs text-zinc-400">
-          {event.latency_ms != null && <span>{event.latency_ms}ms</span>}
-          {event.cost_usd != null && <span>${event.cost_usd.toFixed(6)}</span>}
-        </span>
-      </div>
+    <li style={{ display: "grid", gridTemplateColumns: "74px 20px minmax(0, 1fr)", paddingBottom: 24 }}>
+      <span
+        className="cw-mono"
+        style={{ fontSize: 11, lineHeight: 1.4, color: "var(--quiet)", paddingTop: 1 }}
+      >
+        {timeOf(event.created_at)}
+      </span>
 
-      {event.tool_name && <p className="mt-1 font-medium">{event.tool_name}</p>}
-      {event.rationale && <p className="mt-1 text-zinc-600 dark:text-zinc-400">{event.rationale}</p>}
-      {hasPayload && (
-        <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-zinc-50 p-2 font-mono text-xs text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
-          {JSON.stringify(event.payload, null, 2)}
-        </pre>
-      )}
+      {/* The rail: a dot per event, joined by a hairline. The last event
+          gets no tail, so the timeline visibly ends rather than trailing
+          off into the padding. */}
+      <span style={{ position: "relative", display: "block" }}>
+        {!last && (
+          <span
+            style={{
+              position: "absolute",
+              left: 3,
+              top: 15,
+              bottom: -24,
+              width: 1,
+              background: "var(--rim)",
+            }}
+          />
+        )}
+        <span
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 3,
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: kind.dot,
+          }}
+        />
+      </span>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: kind.weight, lineHeight: 1.4 }}>
+          {event.tool_name ?? kind.label}
+          {event.tool_name && (
+            <span className="cw-mono" style={{ marginLeft: 8, fontSize: 11, color: "var(--quiet)" }}>
+              {kind.label}
+            </span>
+          )}
+        </div>
+
+        {event.rationale && (
+          <p style={{ margin: "5px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--dim)" }}>
+            {event.rationale}
+          </p>
+        )}
+
+        {hasPayload && (
+          <pre
+            className="cw-mono cw-scroll-x"
+            style={{
+              margin: "10px 0 0",
+              maxHeight: 220,
+              overflowY: "auto",
+              border: "1px solid var(--rim)",
+              borderRadius: 12,
+              background: "var(--sheet)",
+              padding: "12px 14px",
+              fontSize: 11,
+              lineHeight: 1.65,
+              color: "var(--dim)",
+            }}
+          >
+            {JSON.stringify(event.payload, null, 2)}
+          </pre>
+        )}
+
+        {(event.latency_ms != null || event.cost_usd != null) && (
+          <div
+            className="cw-mono"
+            style={{ marginTop: 7, fontSize: 11, color: "var(--quiet)" }}
+          >
+            {[
+              event.latency_ms != null ? `${event.latency_ms}ms` : null,
+              event.cost_usd != null ? `$${event.cost_usd.toFixed(6)}` : null,
+              event.input_tokens != null && event.output_tokens != null
+                ? `${event.input_tokens}→${event.output_tokens} tok`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        )}
+      </div>
     </li>
   );
 }
@@ -53,67 +127,77 @@ export function RunTrace({ runId, initialStatus }: { runId: string; initialStatu
   const seenIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    let source: EventSource | null = null;
-    let cancelled = false;
+    const account = readAccount();
+    if (!account) return;
 
-    createClient()
-      .auth.getSession()
-      .then(({ data: { session } }) => {
-        if (cancelled || !session) return;
-
-        source = new EventSource(api.runEventsUrl(session.access_token, runId));
-        source.onmessage = (e) => {
-          const event: AgentEvent = JSON.parse(e.data);
-          if (seenIds.current.has(event.id)) return;
-          seenIds.current.add(event.id);
-          setEvents((prev) => [...prev, event].sort((a, b) => a.seq - b.seq));
-        };
-        source.onerror = () => setConnectionError(true);
-      });
+    const source = new EventSource(api.runEventsUrl(account, runId));
+    source.onmessage = (e) => {
+      const event: AgentEvent = JSON.parse(e.data);
+      if (seenIds.current.has(event.id)) return;
+      seenIds.current.add(event.id);
+      setEvents((prev) => [...prev, event].sort((a, b) => a.seq - b.seq));
+    };
+    source.onerror = () => setConnectionError(true);
 
     // Poll the run's own status separately -- the SSE stream only ever
     // carries agent_event rows, not the parent run's status, and the
     // stream closes itself once the run finishes (see api.py).
     const statusPoll = setInterval(() => {
-      createClient()
-        .auth.getSession()
-        .then(({ data: { session } }) => {
-          if (!session) return;
-          return api.getRun(session.access_token, runId);
-        })
-        .then((run) => {
-          if (run) setStatus(run.status);
-        })
+      api
+        .getRun(account, runId)
+        .then((run) => setStatus(run.status))
         .catch(() => {});
     }, 2000);
 
     return () => {
-      cancelled = true;
-      source?.close();
+      source.close();
       clearInterval(statusPoll);
     };
   }, [runId]);
 
+  const tone =
+    status === "running" ? "var(--warn)" : status === "failed" ? "var(--bad)" : "var(--ok)";
+
   return (
-    <div className="mt-6">
-      <div className="mb-3 flex items-center gap-2 text-xs text-zinc-400">
+    <div className="cw-card" style={{ padding: 24 }}>
+      <div className="cw-row" style={{ gap: 9 }}>
         <span
-          className={`h-2 w-2 rounded-full ${status === "running" ? "animate-pulse bg-amber-500" : status === "failed" ? "bg-red-500" : "bg-emerald-500"}`}
+          className={`cw-dot ${status === "running" ? "cw-dot-live" : ""}`}
+          style={{ background: tone }}
         />
-        {status === "running" ? "live" : status}
-        {connectionError && <span className="text-red-500">· stream reconnecting</span>}
+        <span
+          className="cw-mono"
+          style={{
+            fontSize: 11,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--dim)",
+          }}
+        >
+          {status === "running" ? "live" : status}
+          {events.length > 0 ? ` · ${events.length} events` : ""}
+        </span>
+        {connectionError && status === "running" && (
+          <span className="cw-mono" style={{ fontSize: 11, color: "var(--warn)" }}>
+            stream reconnecting
+          </span>
+        )}
       </div>
 
       {events.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-zinc-300 py-12 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          Waiting for events…
+        <div style={{ marginTop: 20 }}>
+          <Empty title={status === "running" ? "Waiting for events" : "No events recorded"}>
+            {status === "running"
+              ? "The stream is open. Steps appear here as the agent takes them."
+              : "This run finished without writing any audit events."}
+          </Empty>
         </div>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {events.map((event) => (
-            <EventCard key={event.id} event={event} />
+        <ol style={{ listStyle: "none", margin: "24px 0 0", padding: 0 }}>
+          {events.map((event, index) => (
+            <Event key={event.id} event={event} last={index === events.length - 1} />
           ))}
-        </ul>
+        </ol>
       )}
     </div>
   );

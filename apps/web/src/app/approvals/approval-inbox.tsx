@@ -1,16 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type Approval } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
-import { createClient } from "@/lib/supabase/client";
+import { readAccount } from "@/lib/account";
+import { Empty } from "@/components/ui";
 
 const POLL_MS = 5000;
-
-const RISK_STYLES: Record<Approval["risk"], string> = {
-  medium: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  high: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-};
 
 function actionVerb(actionType: string) {
   switch (actionType) {
@@ -29,6 +24,31 @@ function actionVerb(actionType: string) {
   }
 }
 
+/** Which stage of the spine queued this, named for the tool that wrote
+ *  it rather than for an agent that doesn't exist. */
+function workflowOf(actionType: string) {
+  if (actionType === "send_pitch") return "Pitching";
+  if (actionType === "send_quote" || actionType === "send_invoice") return "Quoting";
+  if (actionType === "send_payment_chase") return "Collections";
+  return "Conversation";
+}
+
+/** The one line naming who this is about, read off whatever the payload
+ *  actually carries for that action type. */
+function subjectOf(approval: Approval): string | null {
+  const payload = approval.payload as Record<string, unknown>;
+  const diff = approval.state_diff as Record<string, unknown>;
+  if (typeof payload.opportunity_title === "string") return payload.opportunity_title;
+  if (typeof diff.invoice === "string")
+    return `Invoice ${diff.invoice}${diff.days_overdue ? ` · ${diff.days_overdue} days overdue` : ""}`;
+  if (typeof diff.total === "string") return String(diff.total);
+  return null;
+}
+
+function timeOf(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
 export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval[] }) {
   const [approvals, setApprovals] = useState<Approval[]>(initialApprovals);
   const [selected, setSelected] = useState(0);
@@ -37,31 +57,20 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = useMemo(() => createClient(), []);
-  // Fetched fresh before every call rather than cached once -- a session
-  // open long enough for the access token to expire and silently refresh
-  // (Supabase handles the refresh; we just need to not be holding a stale
-  // copy of the old token when that happens).
-  const getToken = useCallback(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) throw new Error("Not signed in");
-    return session.access_token;
-  }, [supabase]);
-
-  // Don't clobber a card mid-edit out from under the user -- re-created (and
-  // the interval below re-subscribed) whenever editingId flips, which just
-  // resets the poll timer, not a real cost at a 5s cadence.
+  // Don't clobber a card mid-edit out from under the user -- re-created
+  // (and the interval below re-subscribed) whenever editingId flips,
+  // which just resets the poll timer, not a real cost at a 5s cadence.
   const refresh = useCallback(() => {
     if (editingId !== null) return;
-    getToken()
-      .then((token) => api.listApprovals(token, "pending"))
+    const account = readAccount();
+    if (!account) return;
+    api
+      .listApprovals(account, "pending")
       .then(setApprovals)
       .catch(() => {
-        /* transient poll failure -- keep showing stale data rather than blank */
+        /* transient poll failure -- keep stale data rather than blanking */
       });
-  }, [editingId, getToken]);
+  }, [editingId]);
 
   useEffect(() => {
     const id = setInterval(refresh, POLL_MS);
@@ -69,45 +78,31 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
   }, [refresh]);
 
   // Derived, not synced via effect: clamp instead of storing an
-  // out-of-range index when the list shrinks (e.g. after approve/reject).
+  // out-of-range index when the list shrinks after approve/reject.
   const safeSelected = Math.min(selected, Math.max(approvals.length - 1, 0));
 
-  const removeLocally = (id: string) => setApprovals((prev) => prev.filter((a) => a.id !== id));
-
-  const handleApprove = useCallback(
-    async (approval: Approval) => {
+  const decide = useCallback(
+    async (approval: Approval, verb: "approve" | "reject") => {
       setBusyId(approval.id);
       setError(null);
-      removeLocally(approval.id);
+      // Optimistic: the card goes immediately, and is put back if the
+      // call fails. Waiting on a round trip for every keypress makes the
+      // keyboard flow feel broken.
+      setApprovals((prev) => prev.filter((a) => a.id !== approval.id));
       try {
-        const token = await getToken();
-        await api.approve(token, approval.id);
+        const account = readAccount();
+        if (!account) throw new Error("No workspace");
+        await (verb === "approve"
+          ? api.approve(account, approval.id)
+          : api.reject(account, approval.id));
       } catch (err) {
         setApprovals((prev) => [approval, ...prev]);
-        setError(`Couldn't approve: ${(err as Error).message}`);
+        setError(`Couldn't ${verb}: ${(err as Error).message}`);
       } finally {
         setBusyId(null);
       }
     },
-    [getToken],
-  );
-
-  const handleReject = useCallback(
-    async (approval: Approval) => {
-      setBusyId(approval.id);
-      setError(null);
-      removeLocally(approval.id);
-      try {
-        const token = await getToken();
-        await api.reject(token, approval.id);
-      } catch (err) {
-        setApprovals((prev) => [approval, ...prev]);
-        setError(`Couldn't reject: ${(err as Error).message}`);
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [getToken],
+    [],
   );
 
   const startEdit = (approval: Approval) => {
@@ -118,8 +113,9 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
   const saveEdit = async (approval: Approval) => {
     setError(null);
     try {
-      const token = await getToken();
-      const updated = await api.editApproval(token, approval.id, { body: draft });
+      const account = readAccount();
+      if (!account) throw new Error("No workspace");
+      const updated = await api.editApproval(account, approval.id, { body: draft });
       setApprovals((prev) => prev.map((a) => (a.id === approval.id ? updated : a)));
     } catch (err) {
       setError(`Couldn't save edit: ${(err as Error).message}`);
@@ -143,10 +139,10 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
 
       if (e.key === "a") {
         e.preventDefault();
-        handleApprove(current);
+        decide(current, "approve");
       } else if (e.key === "r") {
         e.preventDefault();
-        handleReject(current);
+        decide(current, "reject");
       } else if (e.key === "e") {
         e.preventDefault();
         startEdit(current);
@@ -160,138 +156,231 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [approvals, safeSelected, editingId, handleApprove, handleReject]);
+  }, [approvals, safeSelected, editingId, decide]);
+
+  if (approvals.length === 0) {
+    return (
+      <Empty title="Nothing needs your attention">
+        The agent is monitoring the operation. The next thing it wants to send a client will surface
+        here, with what it will do, why, what it read, and what changes.
+      </Empty>
+    );
+  }
 
   return (
-    <div className="mt-6">
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          <kbd className="rounded border border-zinc-300 px-1 dark:border-zinc-700">↑↓</kbd> navigate ·{" "}
-          <kbd className="rounded border border-zinc-300 px-1 dark:border-zinc-700">a</kbd> approve ·{" "}
-          <kbd className="rounded border border-zinc-300 px-1 dark:border-zinc-700">r</kbd> reject ·{" "}
-          <kbd className="rounded border border-zinc-300 px-1 dark:border-zinc-700">e</kbd> edit
+    <>
+      {error && (
+        <p
+          style={{
+            margin: 0,
+            fontSize: 13,
+            color: "var(--bad)",
+            border: "1px solid var(--rim)",
+            borderRadius: 12,
+            padding: "10px 14px",
+          }}
+        >
+          {error}
         </p>
-        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
-      </div>
+      )}
 
-      {approvals.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-zinc-300 py-16 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          Nothing waiting on you. Clockwork is either idle or already caught up.
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-3">
-          {approvals.map((approval, i) => {
-            const isSelected = i === safeSelected;
-            const isEditing = editingId === approval.id;
-            const isBusy = busyId === approval.id;
+      <div className="cw-stack">
+        {approvals.map((approval, index) => {
+          const isSelected = index === safeSelected;
+          const isEditing = editingId === approval.id;
+          const isBusy = busyId === approval.id;
+          const subject = subjectOf(approval);
+          const changes = Object.entries(approval.state_diff ?? {});
 
-            return (
-              <li
-                key={approval.id}
-                onClick={() => setSelected(i)}
-                className={`cursor-pointer rounded-lg border p-4 transition-colors ${
-                  isSelected
-                    ? "border-zinc-900 bg-white dark:border-zinc-100 dark:bg-zinc-900"
-                    : "border-zinc-200 bg-white/60 dark:border-zinc-800 dark:bg-zinc-900/40"
-                } ${isBusy ? "opacity-50" : ""}`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <span className="font-medium">{actionVerb(approval.action_type)}</span>
+          return (
+            <article
+              key={approval.id}
+              onClick={() => setSelected(index)}
+              style={{
+                cursor: "pointer",
+                border: `1px solid ${isSelected ? "var(--rim2)" : "var(--rim)"}`,
+                borderRadius: "var(--r-card)",
+                background: "var(--glass)",
+                backdropFilter: "blur(16px)",
+                boxShadow: isSelected
+                  ? "var(--hi), 0 18px 50px -28px rgba(0,0,0,.9)"
+                  : "var(--hi)",
+                opacity: isBusy ? 0.5 : 1,
+                transition: "border-color var(--t), box-shadow var(--t), opacity var(--t)",
+              }}
+            >
+              <div className="cw-approval-grid">
+                <div style={{ minWidth: 0, padding: 24 }}>
+                  <div className="cw-row" style={{ gap: 10 }}>
                     <span
-                      className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${RISK_STYLES[approval.risk]}`}
+                      className="cw-status"
+                      style={{
+                        color: approval.risk === "high" ? "var(--bad)" : "var(--warn)",
+                      }}
                     >
                       {approval.risk} risk
                     </span>
+                    <span style={{ width: 1, height: 11, background: "var(--rim2)" }} />
+                    <span className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)" }}>
+                      {workflowOf(approval.action_type)}
+                    </span>
+                    <time
+                      className="cw-mono"
+                      style={{ marginLeft: "auto", fontSize: 11, color: "var(--quiet)" }}
+                      dateTime={approval.created_at}
+                    >
+                      {timeOf(approval.created_at)}
+                    </time>
                   </div>
-                  <time className="shrink-0 text-xs text-zinc-400">
-                    {formatDateTime(approval.created_at)}
-                  </time>
-                </div>
 
-                {approval.rationale && (
-                  <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-                    <span className="font-medium text-zinc-500 dark:text-zinc-500">Why: </span>
-                    {approval.rationale}
-                  </p>
-                )}
-
-                {isEditing ? (
-                  <textarea
-                    autoFocus
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        saveEdit(approval);
-                      }
+                  <h2
+                    style={{
+                      margin: "16px 0 0",
+                      fontSize: 20,
+                      fontWeight: 600,
+                      letterSpacing: "-0.028em",
+                      lineHeight: 1.3,
                     }}
-                    rows={8}
-                    className="mt-3 w-full rounded-md border border-zinc-300 bg-white p-3 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                ) : (
-                  typeof approval.payload.body === "string" && (
-                    <pre className="mt-3 whitespace-pre-wrap rounded-md bg-zinc-50 p-3 font-sans text-sm dark:bg-zinc-950">
-                      {approval.payload.body}
-                    </pre>
-                  )
-                )}
-
-                <div className="mt-3 flex items-center justify-between text-xs text-zinc-400">
-                  <span>
-                    What changes: {Object.entries(approval.state_diff).map(([k, v]) => `${k}=${String(v)}`).join(", ") || "—"}
-                  </span>
-                  <span>Read {approval.citations.length} message{approval.citations.length === 1 ? "" : "s"}</span>
-                </div>
-
-                <div className="mt-3 flex gap-2">
-                  {isEditing ? (
-                    <>
-                      <button
-                        onClick={() => saveEdit(approval)}
-                        className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-                      >
-                        Save (⌘⏎)
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
-                      >
-                        Cancel (Esc)
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        disabled={isBusy}
-                        onClick={() => handleApprove(approval)}
-                        className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                      >
-                        Approve (a)
-                      </button>
-                      <button
-                        disabled={isBusy}
-                        onClick={() => handleReject(approval)}
-                        className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                      >
-                        Reject (r)
-                      </button>
-                      <button
-                        disabled={isBusy}
-                        onClick={() => startEdit(approval)}
-                        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-zinc-700"
-                      >
-                        Edit (e)
-                      </button>
-                    </>
+                  >
+                    {actionVerb(approval.action_type)}
+                  </h2>
+                  {subject && (
+                    <p style={{ margin: "6px 0 0", fontSize: 13.5, color: "var(--dim)" }}>
+                      {subject}
+                    </p>
                   )}
+                  {approval.rationale && (
+                    <p
+                      style={{
+                        margin: "14px 0 0",
+                        fontSize: 13.5,
+                        lineHeight: 1.6,
+                        color: "var(--sub)",
+                        maxWidth: "62ch",
+                      }}
+                    >
+                      {approval.rationale}
+                    </p>
+                  )}
+
+                  {isEditing ? (
+                    <textarea
+                      className="cw-input"
+                      autoFocus
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      style={{
+                        marginTop: 18,
+                        minHeight: 220,
+                        fontSize: 13,
+                        lineHeight: 1.7,
+                        resize: "vertical",
+                      }}
+                    />
+                  ) : (
+                    <pre
+                      style={{
+                        margin: "18px 0 0",
+                        whiteSpace: "pre-wrap",
+                        border: "1px solid var(--rim)",
+                        background: "var(--sheet)",
+                        borderRadius: 14,
+                        padding: 18,
+                        fontFamily: "inherit",
+                        fontSize: 13,
+                        lineHeight: 1.7,
+                        color: "var(--sub)",
+                        boxShadow: "var(--hi)",
+                      }}
+                    >
+                      {String(approval.payload.body ?? "(no body)")}
+                    </pre>
+                  )}
+
+                  <div className="cw-row" style={{ gap: 9, marginTop: 18 }}>
+                    {isEditing ? (
+                      <>
+                        <button
+                          className="cw-btn cw-btn-primary"
+                          onClick={() => saveEdit(approval)}
+                        >
+                          Save edit
+                        </button>
+                        <button className="cw-btn" onClick={() => setEditingId(null)}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="cw-btn cw-btn-primary"
+                          disabled={isBusy}
+                          onClick={() => decide(approval, "approve")}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="cw-btn"
+                          disabled={isBusy}
+                          onClick={() => decide(approval, "reject")}
+                        >
+                          Reject
+                        </button>
+                        <button className="cw-btn cw-btn-quiet" onClick={() => startEdit(approval)}>
+                          Edit
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+
+                {/* The rail: what it read, and what changes if you say yes.
+                    Every figure here is a stored value -- there is no
+                    invented confidence score. */}
+                <div className="cw-approval-rail">
+                  <div>
+                    <div className="cw-label">Evidence</div>
+                    <div className="cw-num" style={{ marginTop: 10, fontSize: 23 }}>
+                      {approval.citations?.length ?? 0}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--quiet)" }}>
+                      sources read before drafting
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="cw-label">If you approve</div>
+                    <ul style={{ listStyle: "none", margin: "10px 0 0", padding: 0 }}>
+                      {changes.length === 0 ? (
+                        <li style={{ fontSize: 13, color: "var(--quiet)" }}>no recorded change</li>
+                      ) : (
+                        changes.map(([key, value]) => (
+                          <li
+                            key={key}
+                            style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--dim)" }}
+                          >
+                            <span className="cw-mono" style={{ color: "var(--quiet)" }}>
+                              {key}
+                            </span>{" "}
+                            {String(value)}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <div className="cw-label">Sent?</div>
+                    <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.55, color: "var(--dim)" }}>
+                      Not yet. This tool has no code path that sends — only approving runs one.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </>
   );
 }

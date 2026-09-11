@@ -74,25 +74,25 @@ Getting paid is the half of freelancing people avoid, and it is the half where a
 
 ---
 
-## A note on Bedrock
+## The model layer
 
-This was built to run on **Amazon Bedrock** — Claude Sonnet 5 for internal orchestration, Amazon Nova for client-facing text. The model router, region config, and pricing tables for that routing are all in `models.py` and work.
+One agent, three jobs, three different models — because they are not the same kind of work:
 
-It does not run on Bedrock today. This AWS account has been under an account-level hold for the entire build: `get_foundation_model_availability` reports `NOT_AUTHORIZED` for **every** model including Nova, the same `ValidationException: Operation not allowed` reproduces in the Bedrock console playground, and AWS Support routed the request to their Sales team, where it has sat unresolved for three weeks.
+| Role | Model | Why |
+|---|---|---|
+| Orchestrator | `gpt-oss-120b` | Holds a long transcript and picks the right tool |
+| Writer | `gpt-oss-20b` | Client-facing prose, on its own rate-limit budget so a long orchestrator run can't starve it |
+| Extractor | `gpt-oss-20b` | Cheap classification that runs dozens of times per sync |
 
-Rather than stall, the model layer was made provider-agnostic behind Strands' `Model` interface. Switching back is one line in `.env`:
+Every call site goes through the `Role` enum, never a model id — `models.py` and `ledger.invoke_model` are the only two places a provider is named. That is what makes the daily spend cap, the degrade path and the per-run cost ledger possible at all: they key off the role, not off whatever model happens to serve it.
 
-```
-MODEL_PROVIDER=bedrock   # or groq
-```
-
-The demo runs on Groq (`gpt-oss-120b` / `gpt-oss-20b`) via Strands' LiteLLM integration. Every tool, hook, and structured-output call sits above that line and is untouched by the swap — which is the honest argument for the abstraction being real rather than aspirational.
+Running on Groq via Strands' LiteLLM integration. When the day's spend crosses the cap, the orchestrator degrades to the writer's smaller model and writes a `decision` event saying so, rather than silently getting worse.
 
 ---
 
 ## Running it
 
-**Prerequisites:** Python 3.14, Node 22, a Supabase project, and either Bedrock access or a Groq API key.
+**Prerequisites:** Python 3.14, Node 22, a Supabase project, and a Groq API key.
 
 ```bash
 # 1. Database — run these in the Supabase SQL editor, in order
@@ -101,23 +101,22 @@ apps/agent/db/002_agent_runtime.sql
 apps/agent/db/003_grants.sql
 apps/agent/db/004_sourcing.sql
 apps/agent/db/005_money.sql
+apps/agent/db/006_accounts.sql
 
 # 2. Backend
 cd apps/agent
-cp .env.example .env        # fill in Supabase keys + MODEL_PROVIDER + GROQ_API_KEY
+cp .env.example .env        # Supabase keys + GROQ_API_KEY
 python -m venv .venv && .venv/Scripts/activate
 pip install -r requirements.txt
 PYTHONPATH=src uvicorn clockwork.api:app --port 8000
 
 # 3. Frontend
 cd apps/web
-cp .env.example .env.local  # NEXT_PUBLIC_API_URL + Supabase URL/anon key
+cp .env.example .env.local  # NEXT_PUBLIC_API_URL
 npm install && npm run dev
 ```
 
-Then open `http://localhost:3000`, sign in with a magic link, and fill in your profile — the agent goes to work as soon as you save it.
-
-> Open the magic link **in the same browser you requested it from**. PKCE ties the sign-in to that browser by design.
+Then open `http://localhost:3000`. There is no sign-in: the onboarding form is the front door, and filling it in creates your workspace. The agent goes to work the moment you finish it.
 
 ---
 
@@ -127,13 +126,14 @@ Then open `http://localhost:3000`, sign in with a magic link, and fill in your p
 apps/agent/          FastAPI + the Strands agent
   src/clockwork/
     agent.py         run_agent() — the single entry point
-    api.py           HTTP surface (auth on every route bar /intake and /health)
+    api.py           HTTP surface (workspace header on every route bar /accounts, /intake, /health)
     audit.py         Strands hooks → agent_event
-    auth.py          Supabase JWT verification
+    auth.py          workspace identity (read its docstring: identifies, does not authenticate)
     clock.py         the virtual clock — every time read goes through here
     executor.py      performs approved side effects
     ledger.py        model routing spend, daily cap, structured-output validation
-    models.py        Bedrock ⇄ Groq router, per-role pricing
+    models.py        per-role model routing and pricing
+    overview.py      every dashboard number, computed from real rows
     scheduler.py     tick() — drains due tasks, fires the agent
     sources/         one adapter per public feed
     tools/           the 12 agent tools (money.py = quote/invoice/chase)
@@ -141,11 +141,14 @@ apps/agent/          FastAPI + the Strands agent
 
 apps/web/            Next.js 16 (App Router)
   src/app/
-    onboarding/      first run: profile → source → score → pitch
+    onboarding/      the front door: profile → source → score → pitch
+    overview/        the dashboard
+    workflows/       the four stages, measured by what they produced
     approvals/       the Approval Inbox — keyboard-driven a/r/e
     opportunities/   sourced leads, ranked by fit
     money/           quotes and invoices — accept, decline, mark paid, chase
     runs/            Run Trace — live SSE replay of any agent run
+    settings/        profile, spend cap, and the locked approval gate
 ```
 
 ---
@@ -157,6 +160,7 @@ Stated plainly, because a demo that hides these is worth less than one that does
 - **Email is not wired.** Approving a message records it as sent and updates the thread; it does not transmit. Gmail's `gmail.send` is a restricted scope requiring a CASA Tier 2 audit, which is not achievable in a hackathon window, so it was deliberately deferred rather than half-built.
 - **No payment processor.** Marking an invoice paid is a human action. There is no Stripe integration, no card data, and nothing here can move money — taking payment is not something this agent should be able to do, and faking a processor for a demo would misrepresent where the human stays in the loop.
 - **No tax handling on quotes.** VAT and sales tax depend on both parties' jurisdictions, which is a real compliance question rather than one to guess at. `subtotal` and `total` are separate columns so adding it later needs no migration.
+- **There is no authentication.** A workspace is created by filling in the onboarding form and identified from then on by an unguessable id in a cookie. Anyone holding that id can read and write that workspace — no password, no expiry, no revocation. That is a deliberate trade for a demo whose data you typed in thirty seconds ago, and the wrong trade for real client correspondence. `auth.py` says so in its own docstring rather than letting a UUID imply more than it delivers.
 - **No automated tests.** Every claim here was verified by hand against live feeds and a real database.
 
 ## Licence

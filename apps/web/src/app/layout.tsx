@@ -1,32 +1,42 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { Nav } from "@/components/nav";
+import { Figtree, Geist_Mono } from "next/font/google";
+import { AppShell } from "@/components/shell/app-shell";
+import { NO_FLASH_SCRIPT } from "@/components/shell/shell-context";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "Clockwork",
-  description: "Runs your business like clockwork, even while you sleep.",
+  description: "Runs the business half of freelancing, on a clock, while nobody is watching.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // Written again on the client before paint; this is the
+      // server-rendered default so the markup is never attribute-less.
+      data-theme="dark"
+      data-ambient="on"
+      className={`${figtree.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
     >
-      <body className="flex min-h-full flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-        <Nav />
-        <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
+      </head>
+      <body>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

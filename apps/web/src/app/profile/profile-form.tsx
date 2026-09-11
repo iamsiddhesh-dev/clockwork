@@ -1,342 +1,387 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { api, type PortfolioItem, type Profile } from "@/lib/api";
-import { createClient } from "@/lib/supabase/client";
+import { ensureAccount } from "@/lib/account";
 
-const EMPTY: Omit<Profile, "id" | "user_id"> = {
+export type ProfileDraft = Omit<Profile, "id" | "user_id">;
+
+const EMPTY: ProfileDraft = {
   name: "",
+  email: null,
   skills: [],
   rates: { hourly: undefined, currency: "USD" },
   positioning: null,
   voice_samples: [],
   portfolio: [],
-  payment_terms: null,
+  payment_terms: "Net 14",
 };
 
-const label = "block text-sm font-medium";
-const hint = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
-const field =
-  "mt-2 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950";
+/**
+ * The three things onboarding asks for, in the order they make sense to
+ * a person: who you are, what you charge, and what you have already
+ * done.
+ *
+ * Every field here is load-bearing, which is why the form refuses to
+ * continue without them rather than saving a half-profile that produces
+ * confident nonsense downstream:
+ *   - rate      -> draft_quote prices off it. No rate means invented numbers.
+ *   - portfolio -> draft_pitch quotes a result verbatim. No portfolio
+ *                  means generic filler, which is the spam this replaces.
+ *   - skills    -> score_fit ranks postings against them.
+ * Email is contact data, not a credential -- nothing signs in with it.
+ */
+export const STEPS = [
+  { key: "you", label: "You", blurb: "Who the work comes from." },
+  { key: "work", label: "Work", blurb: "What you do and what it costs." },
+  { key: "proof", label: "Proof", blurb: "The results your pitches will cite." },
+] as const;
 
+export type StepKey = (typeof STEPS)[number]["key"];
+
+function Field({
+  label,
+  hint,
+  children,
+  required,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label style={{ display: "block" }}>
+      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+        {label}
+        {required ? <span style={{ color: "var(--orange-ink)" }}> *</span> : null}
+      </span>
+      {hint ? (
+        <span
+          style={{ display: "block", marginTop: 3, fontSize: 12, color: "var(--quiet)", lineHeight: 1.5 }}
+        >
+          {hint}
+        </span>
+      ) : null}
+      <span style={{ display: "block", marginTop: 8 }}>{children}</span>
+    </label>
+  );
+}
+
+export function stepErrors(form: ProfileDraft, skillsText: string): Record<StepKey, string | null> {
+  const skills = skillsText
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const hourly = Number(form.rates?.hourly);
+  const usable = form.portfolio.filter((p) => p.title.trim() && p.summary.trim());
+
+  return {
+    you: !form.name.trim()
+      ? "Your name is what outbound work is signed with."
+      : !form.email?.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())
+        ? "A real email address -- it is where a reply would land."
+        : null,
+    work: skills.length === 0
+      ? "At least one skill, or there is nothing to score postings against."
+      : !hourly || hourly <= 0
+        ? "A rate above zero. Quotes are priced off this, in code."
+        : null,
+    proof: usable.length === 0
+      ? "At least one result, with a title and a sentence describing it."
+      : null,
+  };
+}
+
+export function ProfileFields({
+  form,
+  setForm,
+  skillsText,
+  setSkillsText,
+  only,
+}: {
+  form: ProfileDraft;
+  setForm: (next: ProfileDraft) => void;
+  skillsText: string;
+  setSkillsText: (next: string) => void;
+  /** Render one step's fields (onboarding) or all of them (settings). */
+  only?: StepKey;
+}) {
+  const set = <K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) =>
+    setForm({ ...form, [key]: value });
+
+  const show = (step: StepKey) => !only || only === step;
+
+  const updatePortfolio = (index: number, patch: Partial<PortfolioItem>) =>
+    set(
+      "portfolio",
+      form.portfolio.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+    );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {show("you") && (
+        <>
+          <Field label="Name" required hint="Signed at the bottom of every pitch, quote and reminder.">
+            <input
+              className="cw-input"
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="Maya Okonkwo"
+              autoComplete="name"
+            />
+          </Field>
+
+          <Field
+            label="Email"
+            required
+            hint="Contact data, not a login. It is the address a client would reply to."
+          >
+            <input
+              className="cw-input"
+              type="email"
+              value={form.email ?? ""}
+              onChange={(e) => set("email", e.target.value)}
+              placeholder="maya@example.com"
+              autoComplete="email"
+            />
+          </Field>
+
+          <Field
+            label="Positioning"
+            hint="One line on what you are for. Sharpens which postings score well."
+          >
+            <input
+              className="cw-input"
+              value={form.positioning ?? ""}
+              onChange={(e) => set("positioning", e.target.value)}
+              placeholder="Payments and billing infrastructure for B2B SaaS"
+            />
+          </Field>
+        </>
+      )}
+
+      {show("work") && (
+        <>
+          <Field label="Skills" required hint="Comma separated. Postings are ranked against these.">
+            <input
+              className="cw-input"
+              value={skillsText}
+              onChange={(e) => {
+                setSkillsText(e.target.value);
+                setForm({
+                  ...form,
+                  skills: e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                });
+              }}
+              placeholder="TypeScript, Stripe Billing, Postgres, React"
+            />
+          </Field>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+            <div style={{ flex: "1 1 180px" }}>
+              <Field label="Hourly rate" required hint="Quote totals are computed from this.">
+                <input
+                  className="cw-input"
+                  type="number"
+                  min={0}
+                  value={form.rates?.hourly ?? ""}
+                  onChange={(e) =>
+                    set("rates", {
+                      ...form.rates,
+                      hourly: e.target.value === "" ? undefined : Number(e.target.value),
+                    })
+                  }
+                  placeholder="95"
+                />
+              </Field>
+            </div>
+            <div style={{ flex: "0 1 120px" }}>
+              <Field label="Currency">
+                <input
+                  className="cw-input"
+                  value={String(form.rates?.currency ?? "USD")}
+                  onChange={(e) => set("rates", { ...form.rates, currency: e.target.value })}
+                  placeholder="USD"
+                />
+              </Field>
+            </div>
+          </div>
+
+          <Field
+            label="Payment terms"
+            hint="Sets the invoice due date. Left alone, it is net 14."
+          >
+            <input
+              className="cw-input"
+              value={form.payment_terms ?? ""}
+              onChange={(e) => set("payment_terms", e.target.value)}
+              placeholder="Net 14"
+            />
+          </Field>
+        </>
+      )}
+
+      {show("proof") && (
+        <>
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+              Past results<span style={{ color: "var(--orange-ink)" }}> *</span>
+            </div>
+            <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--quiet)", lineHeight: 1.5 }}>
+              Pitches quote these by name. Include the number if there is one &mdash;{" "}
+              <em>&ldquo;cut failed-payment churn by 40%&rdquo;</em> is what makes outreach land;
+              &ldquo;built a billing system&rdquo; is not.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+              {form.portfolio.map((item, index) => (
+                <div key={index} className="cw-card-sm" style={{ padding: 14 }}>
+                  <input
+                    className="cw-input"
+                    value={item.title}
+                    onChange={(e) => updatePortfolio(index, { title: e.target.value })}
+                    placeholder="Stripe Billing migration for a B2B SaaS"
+                  />
+                  <textarea
+                    className="cw-input"
+                    style={{ marginTop: 8, minHeight: 72, resize: "vertical" }}
+                    value={item.summary}
+                    onChange={(e) => updatePortfolio(index, { summary: e.target.value })}
+                    placeholder="Migrated a legacy invoicing flow to Stripe Billing, cutting failed-payment churn by 40%."
+                  />
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <input
+                      className="cw-input"
+                      value={(item.tags ?? []).join(", ")}
+                      onChange={(e) =>
+                        updatePortfolio(index, {
+                          tags: e.target.value
+                            .split(",")
+                            .map((t) => t.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      placeholder="tags: stripe, billing, saas"
+                    />
+                    <button
+                      type="button"
+                      className="cw-btn cw-btn-sm"
+                      style={{ flex: "none" }}
+                      onClick={() =>
+                        set(
+                          "portfolio",
+                          form.portfolio.filter((_, i) => i !== index),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="cw-btn cw-btn-sm"
+              style={{ marginTop: 12 }}
+              onClick={() =>
+                set("portfolio", [...form.portfolio, { title: "", summary: "", tags: [] }])
+              }
+            >
+              Add a result
+            </button>
+          </div>
+
+          <Field
+            label="How you write"
+            hint="Paste one message you have actually sent. Outreach copies the tone, never the content. Optional, but it is the difference between your voice and a template."
+          >
+            <textarea
+              className="cw-input"
+              style={{ minHeight: 96, resize: "vertical" }}
+              value={(form.voice_samples ?? [])[0] ?? ""}
+              onChange={(e) => set("voice_samples", e.target.value ? [e.target.value] : [])}
+              placeholder="Hi Sam — had a look at the repo. The retry logic is the bit I'd start with…"
+            />
+          </Field>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The single-form version, used by Settings. Onboarding drives
+ *  `ProfileFields` itself so it can step through them. */
 export function ProfileForm({
   initial,
   submitLabel = "Save profile",
   onSaved,
 }: {
   initial: Profile | null;
-  /** Onboarding reuses this form but continues into sourcing, so the
-   * button says what happens next rather than "Save". */
   submitLabel?: string;
-  /** When given, the caller owns what happens after a successful save
-   * (onboarding kicks off sourcing); the inline "Saved." confirmation is
-   * suppressed so the two don't contradict each other. */
   onSaved?: (profile: Profile) => void;
 }) {
-  const [form, setForm] = useState<Omit<Profile, "id" | "user_id">>(() =>
+  const [form, setForm] = useState<ProfileDraft>(() =>
     initial ? { ...EMPTY, ...initial } : EMPTY,
   );
   const [skillsText, setSkillsText] = useState((initial?.skills ?? []).join(", "));
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = useMemo(() => createClient(), []);
-  const getToken = useCallback(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) throw new Error("Not signed in");
-    return session.access_token;
-  }, [supabase]);
+  const errors = useMemo(() => stepErrors(form, skillsText), [form, skillsText]);
+  const firstError = STEPS.map((s) => errors[s.key]).find(Boolean) ?? null;
 
-  function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
-    setForm((f) => ({ ...f, [key]: value }));
-    setStatus("idle");
-  }
-
-  function updatePortfolio(i: number, patch: Partial<PortfolioItem>) {
-    setForm((f) => ({
-      ...f,
-      portfolio: f.portfolio.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
-    }));
-    setStatus("idle");
-  }
-
-  function updateVoiceSample(i: number, value: string) {
-    setForm((f) => ({
-      ...f,
-      voice_samples: f.voice_samples.map((v, idx) => (idx === i ? value : v)),
-    }));
-    setStatus("idle");
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function save() {
+    if (firstError) {
+      setError(firstError);
+      setStatus("error");
+      return;
+    }
     setStatus("saving");
     setError(null);
     try {
-      const token = await getToken();
-      // Skills are edited as one comma-separated line -- friendlier than a
-      // tag widget for the handful of entries this realistically holds.
-      const skills = skillsText
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      // Drop blank rows rather than persisting empty portfolio/voice
-      // entries the agent would then try to ground itself in.
-      const portfolio = form.portfolio.filter((p) => p.title.trim() || p.summary.trim());
-      const voice_samples = form.voice_samples.filter((v) => v.trim());
-
-      const saved = await api.saveProfile(token, { ...form, skills, portfolio, voice_samples });
-      setForm({ ...EMPTY, ...saved });
-      setSkillsText((saved.skills ?? []).join(", "));
-      if (onSaved) {
-        onSaved(saved);
-        return; // caller drives the next step and its own status display
-      }
+      const account = await ensureAccount();
+      const saved = await api.saveProfile(account, {
+        ...form,
+        portfolio: form.portfolio.filter((p) => p.title.trim() && p.summary.trim()),
+      });
       setStatus("saved");
+      onSaved?.(saved);
     } catch (err) {
-      setStatus("error");
       setError((err as Error).message);
+      setStatus("error");
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-6">
-      <div>
-        <label className={label} htmlFor="name">
-          Your name
-        </label>
-        <input
-          id="name"
-          required
-          value={form.name}
-          onChange={(e) => setField("name", e.target.value)}
-          placeholder="Jordan Rivera"
-          className={field}
-        />
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <ProfileFields
+        form={form}
+        setForm={setForm}
+        skillsText={skillsText}
+        setSkillsText={setSkillsText}
+      />
 
-      <div>
-        <label className={label} htmlFor="skills">
-          Skills
-        </label>
-        <p className={hint}>Comma separated. Fit scoring matches sourced work against these.</p>
-        <input
-          id="skills"
-          value={skillsText}
-          onChange={(e) => {
-            setSkillsText(e.target.value);
-            setStatus("idle");
-          }}
-          placeholder="React, Node.js, Stripe, Postgres, TypeScript"
-          className={field}
-        />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className={label} htmlFor="hourly">
-            Hourly rate
-          </label>
-          <input
-            id="hourly"
-            type="number"
-            min={0}
-            value={form.rates.hourly ?? ""}
-            onChange={(e) =>
-              setField("rates", {
-                ...form.rates,
-                hourly: e.target.value === "" ? undefined : Number(e.target.value),
-              })
-            }
-            placeholder="95"
-            className={field}
-          />
-        </div>
-        <div>
-          <label className={label} htmlFor="currency">
-            Currency
-          </label>
-          <input
-            id="currency"
-            value={(form.rates.currency as string) ?? ""}
-            onChange={(e) => setField("rates", { ...form.rates, currency: e.target.value })}
-            placeholder="USD"
-            className={field}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className={label} htmlFor="positioning">
-          Positioning
-        </label>
-        <p className={hint}>One or two sentences on what you do and who for.</p>
-        <textarea
-          id="positioning"
-          rows={3}
-          value={form.positioning ?? ""}
-          onChange={(e) => setField("positioning", e.target.value || null)}
-          placeholder="Freelance full-stack engineer specializing in payments and subscription billing for SaaS products."
-          className={field}
-        />
-      </div>
-
-      <div>
-        <label className={label} htmlFor="terms">
-          Payment terms
-        </label>
-        <input
-          id="terms"
-          value={form.payment_terms ?? ""}
-          onChange={(e) => setField("payment_terms", e.target.value || null)}
-          placeholder="50% upfront, 50% on delivery. Net 14 on invoices."
-          className={field}
-        />
-      </div>
-
-      {/* Portfolio -- what pitches cite as evidence. */}
-      <div>
-        <div className="flex items-center justify-between">
-          <span className={label}>Portfolio</span>
-          <button
-            type="button"
-            onClick={() =>
-              setField("portfolio", [...form.portfolio, { title: "", summary: "", tags: [] }])
-            }
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            + Add case study
-          </button>
-        </div>
-        <p className={hint}>
-          Pitches cite these as evidence. Concrete results (&ldquo;cut churn 40%&rdquo;) work far
-          better than adjectives.
-        </p>
-
-        {form.portfolio.length === 0 ? (
-          <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            No case studies yet.
-          </p>
-        ) : (
-          <div className="mt-3 flex flex-col gap-3">
-            {form.portfolio.map((item, i) => (
-              <div
-                key={i}
-                className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
-              >
-                <div className="flex gap-2">
-                  <input
-                    value={item.title}
-                    onChange={(e) => updatePortfolio(i, { title: e.target.value })}
-                    placeholder="Stripe subscription migration for a B2B SaaS"
-                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setField(
-                        "portfolio",
-                        form.portfolio.filter((_, idx) => idx !== i),
-                      )
-                    }
-                    className="shrink-0 rounded-md border border-zinc-300 px-2 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <textarea
-                  rows={2}
-                  value={item.summary}
-                  onChange={(e) => updatePortfolio(i, { summary: e.target.value })}
-                  placeholder="Migrated a legacy invoicing flow to Stripe Billing with usage-based tiers, cutting failed-payment churn by 40%."
-                  className={field}
-                />
-                <input
-                  value={(item.tags ?? []).join(", ")}
-                  onChange={(e) =>
-                    updatePortfolio(i, {
-                      tags: e.target.value
-                        .split(",")
-                        .map((t) => t.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                  placeholder="Tags: Stripe, subscriptions, SaaS"
-                  className={field}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Voice samples -- how drafted messages learn to sound like you. */}
-      <div>
-        <div className="flex items-center justify-between">
-          <span className={label}>Voice samples</span>
-          <button
-            type="button"
-            onClick={() => setField("voice_samples", [...form.voice_samples, ""])}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            + Add sample
-          </button>
-        </div>
-        <p className={hint}>
-          Paste a couple of messages you&rsquo;ve actually sent clients. Every draft is written to
-          match this tone.
-        </p>
-
-        {form.voice_samples.length === 0 ? (
-          <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            No samples yet &mdash; drafts will use a neutral professional tone.
-          </p>
-        ) : (
-          <div className="mt-3 flex flex-col gap-2">
-            {form.voice_samples.map((sample, i) => (
-              <div key={i} className="flex gap-2">
-                <textarea
-                  rows={2}
-                  value={sample}
-                  onChange={(e) => updateVoiceSample(i, e.target.value)}
-                  placeholder="Thanks for reaching out! Happy to take a look -- could you share a bit more about your current billing setup and timeline?"
-                  className="mt-0 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setField(
-                      "voice_samples",
-                      form.voice_samples.filter((_, idx) => idx !== i),
-                    )
-                  }
-                  className="shrink-0 rounded-md border border-zinc-300 px-2 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+      <div className="cw-row">
         <button
-          type="submit"
+          className="cw-btn cw-btn-primary"
+          onClick={save}
           disabled={status === "saving"}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
         >
-          {status === "saving" ? "Saving..." : submitLabel}
+          {status === "saving" ? "Saving…" : submitLabel}
         </button>
         {status === "saved" && !onSaved && (
-          <span className="text-sm text-emerald-600 dark:text-emerald-400">Saved.</span>
+          <span style={{ fontSize: 13, color: "var(--ok)" }}>Saved.</span>
         )}
-        {status === "error" && (
-          <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
-        )}
+        {error && <span style={{ fontSize: 13, color: "var(--bad)" }}>{error}</span>}
       </div>
-    </form>
+    </div>
   );
 }
+
+export { EMPTY as EMPTY_PROFILE };

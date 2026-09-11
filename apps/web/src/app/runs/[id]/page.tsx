@@ -1,45 +1,70 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { api } from "@/lib/api";
-import { formatDateTime, formatNumber } from "@/lib/format";
-import { requireAccessToken } from "@/lib/supabase/session";
+import { formatDateTime } from "@/lib/format";
+import { requireAccount } from "@/lib/account-server";
+import { Card } from "@/components/ui";
 import { RunTrace } from "./run-trace";
 
 export const dynamic = "force-dynamic";
 
 export default async function RunDetailPage(props: PageProps<"/runs/[id]">) {
   const { id } = await props.params;
-  const accessToken = await requireAccessToken();
+  const account = await requireAccount();
 
-  const run = await api.getRun(accessToken, id).catch(() => null);
+  const run = await api.getRun(account, id).catch(() => null);
   if (!run) notFound();
 
   return (
-    <div>
-      <Link href="/runs" className="text-sm text-zinc-500 hover:underline dark:text-zinc-400">
-        ← All runs
-      </Link>
-
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight capitalize">
-        {run.trigger_type} trigger
-      </h1>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Started {formatDateTime(run.started_at)} · ${formatNumber(run.total_cost_usd)}
-        {run.trigger_ref && <> · ref {run.trigger_ref}</>}
-      </p>
+    <>
+      <header className="cw-page-head" style={{ display: "block" }}>
+        <Link href="/runs" className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)" }}>
+          ← All runs
+        </Link>
+        <h1 className="cw-h1" style={{ textTransform: "capitalize" }}>
+          {run.trigger_type} trigger
+        </h1>
+        <p className="cw-mono" style={{ margin: "14px 0 0", fontSize: 11, color: "var(--quiet)" }}>
+          {formatDateTime(run.started_at)} · ${Number(run.total_cost_usd ?? 0).toFixed(4)}
+          {run.trigger_ref ? ` · ref ${run.trigger_ref}` : ""}
+        </p>
+      </header>
 
       {run.outcome && (
-        <p className="mt-3 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
-          {run.outcome}
-        </p>
+        <Card pad={22}>
+          <div className="cw-label">Outcome</div>
+          <p
+            style={{
+              margin: "12px 0 0",
+              fontSize: 13.5,
+              lineHeight: 1.65,
+              color: "var(--sub)",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {run.outcome}
+          </p>
+        </Card>
       )}
+
       {run.error && (
-        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-          {run.error}
-        </p>
+        <div
+          className="cw-card"
+          style={{ padding: 22, borderColor: "var(--bad)" }}
+        >
+          <div className="cw-label" style={{ color: "var(--bad)" }}>
+            Failed
+          </div>
+          <p
+            className="cw-mono"
+            style={{ margin: "12px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--bad)" }}
+          >
+            {run.error}
+          </p>
+        </div>
       )}
 
       <RunTrace runId={run.id} initialStatus={run.status} />
-    </div>
+    </>
   );
 }

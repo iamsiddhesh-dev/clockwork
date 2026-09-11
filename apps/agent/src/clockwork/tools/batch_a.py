@@ -128,8 +128,8 @@ def log_message(thread_id: str, direction: str, body: str) -> dict:
 @tool
 def extract_requirements(thread_id: str) -> dict:
     """Extract structured requirements (intent, deliverables, deadline,
-    budget hint) from a thread's messages. Cheap classification -- runs
-    on Amazon Nova Lite, never client-visible.
+    budget hint) from a thread's messages. Cheap classification --
+    runs on the small extractor model, never client-visible.
 
     Args:
         thread_id: The thread to extract requirements from.
@@ -155,8 +155,8 @@ def qualify_lead(deal_id: str) -> dict:
     actual conversation, and write the score onto the deal. Also fills in
     deal.intent if it's still empty (e.g. deals created via /intake never
     get one otherwise -- this is the tool that's actually always called,
-    unlike extract_requirements). Cheap classification -- runs on Amazon
-    Nova Lite, never client-visible.
+    unlike extract_requirements). Cheap classification -- runs on
+    the small extractor model, never client-visible.
 
     Args:
         deal_id: The deal to qualify.
@@ -200,9 +200,9 @@ def qualify_lead(deal_id: str) -> dict:
 @tool
 def draft_reply(thread_id: str) -> dict:
     """Draft a reply to the client, grounded in the freelancer's profile
-    and voice, and queue it for approval. Client-facing prose -- runs on
-    Amazon Nova Pro, kept off Claude entirely (no Anthropic watermark
-    exposure on outbound content). Does NOT send anything itself.
+    and voice, and queue it for approval. Client-facing prose -- runs on the
+    writer model, which has its own rate-limit budget so a long
+    orchestrator run can't starve it. Does NOT send anything itself.
 
     Also schedules a follow-up check-in a few days out, in case the
     client goes quiet -- guaranteed, not left to the orchestrator's

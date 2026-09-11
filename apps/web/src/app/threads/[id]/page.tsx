@@ -1,82 +1,111 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { api } from "@/lib/api";
-import { formatDateTime, formatNumber } from "@/lib/format";
-import { requireAccessToken } from "@/lib/supabase/session";
+import { formatDateTime } from "@/lib/format";
+import { requireAccount } from "@/lib/account-server";
+import { Card, compactMoney } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-const SCORE_STYLES: Record<string, string> = {
-  hot: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  warm: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  cold: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
+const SCORE_TONE: Record<string, string> = {
+  hot: "var(--bad)",
+  warm: "var(--warn)",
+  cold: "var(--blue)",
 };
 
 export default async function ThreadDetailPage(props: PageProps<"/threads/[id]">) {
   const { id } = await props.params;
-  const accessToken = await requireAccessToken();
+  const account = await requireAccount();
 
-  const data = await api.getThread(accessToken, id).catch(() => null);
+  const data = await api.getThread(account, id).catch(() => null);
   if (!data) notFound();
 
   const { thread, messages, deal } = data;
 
   return (
-    <div>
-      <Link href="/threads" className="text-sm text-zinc-500 hover:underline dark:text-zinc-400">
-        ← All threads
-      </Link>
-
-      <div className="mt-2 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {thread.contact_name ?? "Unknown contact"}
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {thread.contact_email ?? "no email"} · {thread.channel}
-          </p>
-        </div>
-        {deal?.score && (
-          <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${SCORE_STYLES[deal.score]}`}>
-            {deal.score}
-          </span>
-        )}
-      </div>
-
-      {deal && (
-        <div className="mt-4 rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
-          <p>
-            <span className="font-medium">Stage:</span> {deal.stage}
-            {deal.estimated_value != null && (
-              <>
-                {" · "}
-                <span className="font-medium">Est. value:</span> ${formatNumber(deal.estimated_value)}
-              </>
-            )}
-          </p>
-          {deal.score_rationale && (
-            <p className="mt-1 text-zinc-500 dark:text-zinc-400">{deal.score_rationale}</p>
+    <>
+      <header className="cw-page-head" style={{ display: "block" }}>
+        <Link href="/threads" className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)" }}>
+          ← All threads
+        </Link>
+        <div className="cw-row" style={{ alignItems: "flex-end", gap: 16 }}>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+            <h1 className="cw-h1">{thread.contact_name ?? "Unknown contact"}</h1>
+            <p className="cw-mono" style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)" }}>
+              {thread.contact_email ?? "no email on file"} · {thread.channel}
+            </p>
+          </div>
+          {deal?.score && (
+            <span className="cw-status" style={{ color: SCORE_TONE[deal.score], flex: "none" }}>
+              {deal.score}
+            </span>
           )}
         </div>
+      </header>
+
+      {deal && (
+        <Card pad={22}>
+          <div className="cw-row" style={{ gap: 24 }}>
+            <div>
+              <div className="cw-label">Stage</div>
+              <div style={{ marginTop: 8, fontSize: 14, fontWeight: 600, textTransform: "capitalize" }}>
+                {deal.stage}
+              </div>
+            </div>
+            {deal.estimated_value != null && (
+              <div>
+                <div className="cw-label">Est. value</div>
+                <div className="cw-num" style={{ marginTop: 8, fontSize: 14 }}>
+                  {compactMoney(deal.estimated_value)}
+                </div>
+              </div>
+            )}
+          </div>
+          {deal.score_rationale && (
+            <p style={{ margin: "16px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--dim)", maxWidth: "62ch" }}>
+              {deal.score_rationale}
+            </p>
+          )}
+        </Card>
       )}
 
-      <ul className="mt-6 flex flex-col gap-3">
-        {messages.map((message) => (
-          <li
-            key={message.id}
-            className={`max-w-2xl rounded-lg p-3 text-sm ${
-              message.direction === "inbound"
-                ? "self-start bg-zinc-100 dark:bg-zinc-800"
-                : "self-end bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-            }`}
-          >
-            <p className="whitespace-pre-wrap">{message.body}</p>
-            <p className="mt-1 text-xs opacity-60">
-              {message.direction} · {formatDateTime(message.sent_at)}
-            </p>
-          </li>
-        ))}
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+        {messages.map((message) => {
+          const inbound = message.direction === "inbound";
+          return (
+            <li
+              key={message.id}
+              style={{
+                maxWidth: "min(70ch, 86%)",
+                alignSelf: inbound ? "flex-start" : "flex-end",
+                border: `1px solid ${inbound ? "var(--rim)" : "var(--orange-bd)"}`,
+                background: inbound ? "var(--glass)" : "var(--orange-bg)",
+                borderRadius: 16,
+                padding: "16px 18px",
+                boxShadow: "var(--hi)",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  fontSize: 13.5,
+                  lineHeight: 1.65,
+                  color: "var(--sub)",
+                }}
+              >
+                {message.body}
+              </p>
+              <p
+                className="cw-mono"
+                style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)" }}
+              >
+                {message.direction} · {formatDateTime(message.sent_at)}
+              </p>
+            </li>
+          );
+        })}
       </ul>
-    </div>
+    </>
   );
 }
