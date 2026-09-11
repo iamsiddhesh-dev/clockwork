@@ -268,9 +268,11 @@ def draft_quote_for(deal_id: str) -> dict:
         (
             "FREELANCER\n"
             f"Name: {profile.get('name')}\n"
+            f"Title: {profile.get('title') or 'not stated'}\n"
             f"Skills: {', '.join(profile.get('skills') or []) or 'none listed'}\n"
-            f"Positioning: {profile.get('positioning') or 'none given'}\n"
+            f"Overview: {profile.get('positioning') or 'none given'}\n"
             f"Rates: {rates}\n"
+            f"Available: {profile.get('availability_hours') or 'unstated'} hours a week\n"
             f"Portfolio (for scale of comparable work): {profile.get('portfolio') or []}\n\n"
             "THE DEAL\n"
             f"Client: {_contact_name(deal['thread_id'], user_id) or '(name unknown)'}\n"
@@ -290,7 +292,8 @@ def draft_quote_for(deal_id: str) -> dict:
             "in the profile and the scope in the conversation; if the conversation "
             "doesn't pin something down, put it in assumptions rather than inventing "
             "a requirement. Do not undercut the freelancer's stated rate to look "
-            "competitive.\n\n"
+            "competitive. The timeline must be reachable at the hours a week they "
+            "actually have available, not at full time.\n\n"
             f"The covering note is client-facing. {NO_PLACEHOLDERS}"
         ),
         structured_output_model=QuoteDraft,

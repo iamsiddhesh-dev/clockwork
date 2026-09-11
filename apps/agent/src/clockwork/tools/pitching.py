@@ -67,8 +67,10 @@ def draft_pitch_for(opportunity_id: str) -> dict:
         (
             "FREELANCER\n"
             f"Name: {profile.get('name')}\n"
+            f"Title: {profile.get('title') or 'not stated'}\n"
             f"Skills: {', '.join(profile.get('skills') or []) or 'none listed'}\n"
-            f"Positioning: {profile.get('positioning') or 'none given'}\n"
+            f"Overview: {profile.get('positioning') or 'none given'}\n"
+            f"Available: {profile.get('availability_hours') or 'unstated'} hours a week\n"
             f"Portfolio: {profile.get('portfolio') or []}\n"
             f"Rates: {profile.get('rates') or {}}\n\n"
             "HOW THEY WRITE (match this tone, do not copy the content):\n"

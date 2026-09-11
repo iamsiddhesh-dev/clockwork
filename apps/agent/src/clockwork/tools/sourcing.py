@@ -52,6 +52,31 @@ def _load_profile(user_id: str) -> dict:
     return res.data
 
 
+def _experience_line(profile: dict) -> str:
+    years = profile.get("years_experience")
+    return f"{years} years" if years else "not stated"
+
+
+def _availability_line(profile: dict) -> str:
+    hours = profile.get("availability_hours")
+    return f"{hours} hours a week" if hours else "not stated"
+
+
+def _floor_line(profile: dict) -> str:
+    """The freelancer's minimum project budget, rendered for the prompt.
+
+    Phrased to the model as a hard floor rather than a preference: a soft
+    hint gets averaged away against an otherwise attractive posting, and
+    an underpaid posting that looks exciting is precisely the one a
+    freelancer most needs protecting from.
+    """
+    floor = profile.get("min_project_budget")
+    if not floor:
+        return "no floor given"
+    currency = (profile.get("rates") or {}).get("currency") or "USD"
+    return f"{currency} {float(floor):,.0f}"
+
+
 def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> dict:
     """Score one opportunity against the freelancer's profile and persist
     the result. Returns the stored row's scoring fields."""
@@ -76,9 +101,13 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
         (
             "FREELANCER PROFILE\n"
             f"Name: {profile.get('name')}\n"
+            f"Title: {profile.get('title') or 'not stated'}\n"
+            f"Experience: {_experience_line(profile)}\n"
             f"Skills: {', '.join(profile.get('skills') or []) or 'none listed'}\n"
-            f"Positioning: {profile.get('positioning') or 'none given'}\n"
+            f"Overview: {profile.get('positioning') or 'none given'}\n"
             f"Rates: {profile.get('rates') or {}}\n"
+            f"Availability: {_availability_line(profile)}\n"
+            f"Will not take work under: {_floor_line(profile)}\n"
             f"Portfolio: {profile.get('portfolio') or []}\n\n"
             "OPPORTUNITY\n"
             f"Title: {opp.get('title')}\n"
@@ -92,7 +121,13 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
             "profile. Be sceptical and specific. A posting for a full-time salaried "
             "role, or one needing a stack they don't list, scores low no matter how "
             "attractive it sounds. Only cite evidence that actually appears in their "
-            "profile -- never invent experience they haven't claimed."
+            "profile -- never invent experience they haven't claimed.\n\n"
+            "Score DOWN hard, and name which of these applies, when: the hours it "
+            "implies exceed the freelancer's stated availability; the stated budget "
+            "is clearly below the floor they gave; or the seniority is far off their "
+            "years of experience in either direction -- a lead role for someone with "
+            "two years wastes their time, a junior role for a principal wastes their "
+            "rate."
         ),
     )
     fit: FitScore = result.structured_output

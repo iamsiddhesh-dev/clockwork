@@ -295,8 +295,12 @@ def get_thread_detail(thread_id: str, user_id: str = Depends(get_current_user_id
 
 class ProfileBody(BaseModel):
     name: str
+    title: str | None = None
     email: str | None = None
     skills: list[str] = []
+    years_experience: int | None = None
+    min_project_budget: float | None = None
+    availability_hours: int | None = None
     rates: dict[str, Any] = {}
     positioning: str | None = None
     voice_samples: list[str] = []

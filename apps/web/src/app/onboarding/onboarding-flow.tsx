@@ -6,13 +6,41 @@ import { api, type KickoffResult, type Profile } from "@/lib/api";
 import { ensureAccount } from "@/lib/account";
 import { Logo } from "@/components/shell/icons";
 import {
+  CompletenessBar,
   EMPTY_PROFILE,
   ProfileFields,
   STEPS,
   stepErrors,
+  usableportfolio,
   type ProfileDraft,
   type StepKey,
 } from "@/app/profile/profile-form";
+
+/** One headline per step. Kept beside the flow rather than in STEPS so
+ *  Settings, which renders the same fields as one page, doesn't inherit
+ *  onboarding's narrative voice. */
+const HEADINGS: Record<StepKey, { title: string; blurb: string }> = {
+  you: {
+    title: "Tell Clockwork who you are.",
+    blurb:
+      "This is the only setup there is. Everything after it — which leads are worth your time, what the outreach says, whose voice it is in — is grounded in what you put here.",
+  },
+  expertise: {
+    title: "What you do, and how well.",
+    blurb:
+      "Skills are what every sourced posting gets ranked against. The overview is what both the scoring and the pitch writing actually reason from, which is why it has a minimum length.",
+  },
+  terms: {
+    title: "What you charge, and what you will take.",
+    blurb:
+      "Quote totals are computed from your rate in code, never guessed by a model. The floor and your availability are how it throws out underpaid work and full-time roles wearing a contract label.",
+  },
+  proof: {
+    title: "What you have already done.",
+    blurb:
+      "This is the part that decides whether outreach lands. The agent cites these results by name and never invents one.",
+  },
+};
 
 type Stage = "form" | "working" | "done" | "error";
 
@@ -71,10 +99,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
     setError(null);
     try {
       const account = await ensureAccount();
-      await api.saveProfile(account, {
-        ...form,
-        portfolio: form.portfolio.filter((p) => p.title.trim() && p.summary.trim()),
-      });
+      await api.saveProfile(account, { ...form, portfolio: usableportfolio(form) });
       setProfileSaved(true);
       setResult(await api.kickoff(account, 10, 1));
       setStage("done");
@@ -108,11 +133,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
           Step {stepIndex + 1} of {STEPS.length} · {step.label}
         </div>
         <h1 className="cw-h1" style={{ marginTop: 12 }}>
-          {stepIndex === 0
-            ? "Tell Clockwork who you are."
-            : stepIndex === 1
-              ? "What you do, and what it costs."
-              : "What you have already done."}
+          {HEADINGS[step.key as StepKey].title}
         </h1>
         <p
           style={{
@@ -123,11 +144,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
             maxWidth: "54ch",
           }}
         >
-          {stepIndex === 0
-            ? "This is the only setup there is. Everything after it — which leads are worth your time, what the outreach says, whose voice it is in — is grounded in what you put here."
-            : stepIndex === 1
-              ? "Quote totals are computed from your rate in code, never guessed by a model. Skills are what every sourced posting gets ranked against."
-              : "This is the part that decides whether outreach lands. The agent cites these results by name and never invents one."}
+          {HEADINGS[step.key as StepKey].blurb}
         </p>
 
         <ProfileFields
@@ -137,6 +154,12 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
           setSkillsText={setSkillsText}
           only={step.key as StepKey}
         />
+
+        {isLast && (
+          <div style={{ marginTop: 22 }}>
+            <CompletenessBar form={form} skillsText={skillsText} />
+          </div>
+        )}
 
         <div className="cw-row" style={{ marginTop: 28 }}>
           {stepIndex > 0 && (

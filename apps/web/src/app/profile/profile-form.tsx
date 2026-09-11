@@ -8,9 +8,13 @@ export type ProfileDraft = Omit<Profile, "id" | "user_id">;
 
 const EMPTY: ProfileDraft = {
   name: "",
+  title: null,
   email: null,
   skills: [],
+  years_experience: null,
   rates: { hourly: undefined, currency: "USD" },
+  min_project_budget: null,
+  availability_hours: null,
   positioning: null,
   voice_samples: [],
   portfolio: [],
@@ -18,43 +22,69 @@ const EMPTY: ProfileDraft = {
 };
 
 /**
- * The three things onboarding asks for, in the order they make sense to
- * a person: who you are, what you charge, and what you have already
- * done.
+ * What onboarding asks for, and why each answer is required or not.
  *
- * Every field here is load-bearing, which is why the form refuses to
- * continue without them rather than saving a half-profile that produces
- * confident nonsense downstream:
- *   - rate      -> draft_quote prices off it. No rate means invented numbers.
- *   - portfolio -> draft_pitch quotes a result verbatim. No portfolio
- *                  means generic filler, which is the spam this replaces.
- *   - skills    -> score_fit ranks postings against them.
- * Email is contact data, not a credential -- nothing signs in with it.
+ * The shape follows Upwork and Freelancer.com -- name, headline, skills,
+ * overview with a real minimum length, rate, availability -- because
+ * those platforms have spent a decade learning which questions a
+ * freelancer will actually answer and in what order. One rule is applied
+ * on top of theirs: **a field is only mandatory when a tool genuinely
+ * cannot work without it.**
+ *
+ * That rule is what keeps this form short. Upwork also collects
+ * education, employment history, languages, certifications and a photo.
+ * All real, all useful to a human browsing a marketplace, and not one of
+ * them changes a decision Clockwork makes -- so they are not here.
+ *
+ * Mandatory, with the tool that breaks otherwise:
+ *   name      -> every draft is signed with it
+ *   email     -> the reply-to on outbound work
+ *   skills    -> score_fit has nothing to rank postings against
+ *   overview  -> score_fit and draft_pitch both reason from it
+ *   rate      -> draft_quote computes totals from it, in code
+ *   portfolio -> draft_pitch quotes a result verbatim; without one,
+ *                outreach becomes the generic filler this replaces
+ *
+ * Everything else sharpens the work without being load-bearing, and is
+ * marked as such rather than being quietly required.
  */
 export const STEPS = [
   { key: "you", label: "You", blurb: "Who the work comes from." },
-  { key: "work", label: "Work", blurb: "What you do and what it costs." },
+  { key: "expertise", label: "Expertise", blurb: "What you do, and how well." },
+  { key: "terms", label: "Terms", blurb: "What you charge and what you will take." },
   { key: "proof", label: "Proof", blurb: "The results your pitches will cite." },
 ] as const;
 
 export type StepKey = (typeof STEPS)[number]["key"];
+
+/** Upwork enforces a 100-character minimum on the overview. The reason
+ *  is the same here: a two-line bio produces two-line reasoning in every
+ *  score and every pitch downstream. */
+const MIN_OVERVIEW = 100;
 
 function Field({
   label,
   hint,
   children,
   required,
+  optional,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
   required?: boolean;
+  optional?: boolean;
 }) {
   return (
     <label style={{ display: "block" }}>
       <span style={{ fontSize: 13.5, fontWeight: 600 }}>
         {label}
         {required ? <span style={{ color: "var(--orange-ink)" }}> *</span> : null}
+        {optional ? (
+          <span className="cw-mono" style={{ marginLeft: 8, fontSize: 10.5, color: "var(--quiet)" }}>
+            OPTIONAL
+          </span>
+        ) : null}
       </span>
       {hint ? (
         <span
@@ -68,28 +98,66 @@ function Field({
   );
 }
 
-export function stepErrors(form: ProfileDraft, skillsText: string): Record<StepKey, string | null> {
-  const skills = skillsText
+export function splitSkills(text: string): string[] {
+  return text
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+export function usableportfolio(form: ProfileDraft): PortfolioItem[] {
+  return form.portfolio.filter((p) => p.title.trim() && p.summary.trim());
+}
+
+export function stepErrors(form: ProfileDraft, skillsText: string): Record<StepKey, string | null> {
+  const skills = splitSkills(skillsText);
   const hourly = Number(form.rates?.hourly);
-  const usable = form.portfolio.filter((p) => p.title.trim() && p.summary.trim());
+  const overview = (form.positioning ?? "").trim();
 
   return {
     you: !form.name.trim()
-      ? "Your name is what outbound work is signed with."
+      ? "Your name — every pitch, quote and reminder is signed with it."
       : !form.email?.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())
-        ? "A real email address -- it is where a reply would land."
+        ? "A real email address. It is the reply-to on outbound work, not a login."
         : null,
-    work: skills.length === 0
-      ? "At least one skill, or there is nothing to score postings against."
-      : !hourly || hourly <= 0
-        ? "A rate above zero. Quotes are priced off this, in code."
+
+    expertise:
+      skills.length === 0
+        ? "At least one skill, or there is nothing to rank postings against."
+        : overview.length < MIN_OVERVIEW
+          ? `${MIN_OVERVIEW - overview.length} more characters of overview. Scoring and pitches both reason from it, so a one-liner produces one-line reasoning.`
+          : null,
+
+    terms:
+      !hourly || hourly <= 0
+        ? "A rate above zero. Quote totals are computed from it, in code."
         : null,
-    proof: usable.length === 0
-      ? "At least one result, with a title and a sentence describing it."
-      : null,
+
+    proof:
+      usableportfolio(form).length === 0
+        ? "At least one result, with a title and a sentence describing it."
+        : null,
+  };
+}
+
+/** How complete the profile is, and what would improve it. Upwork shows
+ *  this because it works: people fill in optional fields when they can
+ *  see what the gap costs them. */
+export function completeness(form: ProfileDraft, skillsText: string) {
+  const skills = splitSkills(skillsText);
+  const checks: { done: boolean; gain: string }[] = [
+    { done: Boolean(form.title?.trim()), gain: "a headline sharpens every pitch opening" },
+    { done: skills.length >= 3, gain: "three or more skills rank postings far better than one" },
+    { done: Boolean(form.years_experience), gain: "years of experience catches seniority mismatches" },
+    { done: Boolean(form.availability_hours), gain: "availability filters out full-time roles" },
+    { done: Boolean(form.min_project_budget), gain: "a budget floor rejects underpaid work for you" },
+    { done: usableportfolio(form).length >= 2, gain: "a second result gives pitches more to cite" },
+    { done: (form.voice_samples ?? []).some((v) => v.trim()), gain: "a writing sample makes drafts sound like you" },
+  ];
+  const done = checks.filter((c) => c.done).length;
+  return {
+    percent: Math.round((done / checks.length) * 100),
+    missing: checks.filter((c) => !c.done).map((c) => c.gain),
   };
 }
 
@@ -111,6 +179,8 @@ export function ProfileFields({
     setForm({ ...form, [key]: value });
 
   const show = (step: StepKey) => !only || only === step;
+  const currency = String(form.rates?.currency ?? "USD");
+  const overviewLength = (form.positioning ?? "").trim().length;
 
   const updatePortfolio = (index: number, patch: Partial<PortfolioItem>) =>
     set(
@@ -118,17 +188,32 @@ export function ProfileFields({
       form.portfolio.map((item, i) => (i === index ? { ...item, ...patch } : item)),
     );
 
+  const numberOrNull = (value: string) => (value === "" ? null : Number(value));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       {show("you") && (
         <>
-          <Field label="Name" required hint="Signed at the bottom of every pitch, quote and reminder.">
+          <Field label="Full name" required hint="Signed at the bottom of every pitch, quote and reminder.">
             <input
               className="cw-input"
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
               placeholder="Maya Okonkwo"
               autoComplete="name"
+            />
+          </Field>
+
+          <Field
+            label="Professional title"
+            optional
+            hint="The headline under your name. Pitches open from it, and it is what a client reads first."
+          >
+            <input
+              className="cw-input"
+              value={form.title ?? ""}
+              onChange={(e) => set("title", e.target.value)}
+              placeholder="Backend engineer · payments and billing"
             />
           </Field>
 
@@ -148,42 +233,87 @@ export function ProfileFields({
           </Field>
 
           <Field
-            label="Positioning"
-            hint="One line on what you are for. Sharpens which postings score well."
+            label="Time zone"
+            optional
+            hint="Used when outreach mentions overlap with a client's working day."
           >
             <input
               className="cw-input"
-              value={form.positioning ?? ""}
-              onChange={(e) => set("positioning", e.target.value)}
-              placeholder="Payments and billing infrastructure for B2B SaaS"
+              value={form.timezone ?? ""}
+              onChange={(e) => set("timezone", e.target.value)}
+              placeholder="Europe/Lisbon"
             />
           </Field>
         </>
       )}
 
-      {show("work") && (
+      {show("expertise") && (
         <>
-          <Field label="Skills" required hint="Comma separated. Postings are ranked against these.">
+          <Field
+            label="Skills"
+            required
+            hint="Comma separated. Every sourced posting is ranked against these — three to eight works far better than one."
+          >
             <input
               className="cw-input"
               value={skillsText}
               onChange={(e) => {
                 setSkillsText(e.target.value);
-                setForm({
-                  ...form,
-                  skills: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                });
+                setForm({ ...form, skills: splitSkills(e.target.value) });
               }}
               placeholder="TypeScript, Stripe Billing, Postgres, React"
             />
           </Field>
 
+          <Field
+            label="Years of experience"
+            optional
+            hint="Catches seniority mismatches in both directions — a lead role you would waste time on, a junior one that wastes your rate."
+          >
+            <input
+              className="cw-input"
+              type="number"
+              min={0}
+              max={60}
+              style={{ maxWidth: 160 }}
+              value={form.years_experience ?? ""}
+              onChange={(e) => set("years_experience", numberOrNull(e.target.value))}
+              placeholder="8"
+            />
+          </Field>
+
+          <Field
+            label="Overview"
+            required
+            hint={
+              <>
+                What you are for, in a short paragraph. Both scoring and pitch drafting reason from
+                this, so it earns its length.{" "}
+                <span
+                  className="cw-mono"
+                  style={{ color: overviewLength >= MIN_OVERVIEW ? "var(--ok)" : "var(--quiet)" }}
+                >
+                  {overviewLength}/{MIN_OVERVIEW}
+                </span>
+              </>
+            }
+          >
+            <textarea
+              className="cw-input"
+              style={{ minHeight: 108, resize: "vertical" }}
+              value={form.positioning ?? ""}
+              onChange={(e) => set("positioning", e.target.value)}
+              placeholder="I rebuild billing and subscription systems for B2B SaaS teams — migrations off legacy processors, dunning and retry logic, proration edge cases. Usually brought in when invoicing has grown organically and started losing money."
+            />
+          </Field>
+        </>
+      )}
+
+      {show("terms") && (
+        <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-            <div style={{ flex: "1 1 180px" }}>
-              <Field label="Hourly rate" required hint="Quote totals are computed from this.">
+            <div style={{ flex: "1 1 170px" }}>
+              <Field label="Hourly rate" required hint="Quote totals are computed from this, in code.">
                 <input
                   className="cw-input"
                   type="number"
@@ -203,7 +333,7 @@ export function ProfileFields({
               <Field label="Currency">
                 <input
                   className="cw-input"
-                  value={String(form.rates?.currency ?? "USD")}
+                  value={currency}
                   onChange={(e) => set("rates", { ...form.rates, currency: e.target.value })}
                   placeholder="USD"
                 />
@@ -212,11 +342,42 @@ export function ProfileFields({
           </div>
 
           <Field
-            label="Payment terms"
-            hint="Sets the invoice due date. Left alone, it is net 14."
+            label="Smallest project worth taking"
+            optional
+            hint={`A floor, not a preference. A posting whose budget is clearly under this gets marked down — which is the one filter no job board gives you. In ${currency}.`}
           >
             <input
               className="cw-input"
+              type="number"
+              min={0}
+              style={{ maxWidth: 200 }}
+              value={form.min_project_budget ?? ""}
+              onChange={(e) => set("min_project_budget", numberOrNull(e.target.value))}
+              placeholder="3000"
+            />
+          </Field>
+
+          <Field
+            label="Hours a week available"
+            optional
+            hint="Catches full-time roles wearing a contract label, and keeps quoted timelines reachable at the hours you actually have."
+          >
+            <input
+              className="cw-input"
+              type="number"
+              min={1}
+              max={168}
+              style={{ maxWidth: 160 }}
+              value={form.availability_hours ?? ""}
+              onChange={(e) => set("availability_hours", numberOrNull(e.target.value))}
+              placeholder="25"
+            />
+          </Field>
+
+          <Field label="Payment terms" optional hint="Sets the invoice due date. Left alone, it is net 14.">
+            <input
+              className="cw-input"
+              style={{ maxWidth: 260 }}
               value={form.payment_terms ?? ""}
               onChange={(e) => set("payment_terms", e.target.value)}
               placeholder="Net 14"
@@ -257,14 +418,7 @@ export function ProfileFields({
                     <input
                       className="cw-input"
                       value={(item.tags ?? []).join(", ")}
-                      onChange={(e) =>
-                        updatePortfolio(index, {
-                          tags: e.target.value
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                        })
-                      }
+                      onChange={(e) => updatePortfolio(index, { tags: splitSkills(e.target.value) })}
                       placeholder="tags: stripe, billing, saas"
                     />
                     <button
@@ -299,7 +453,8 @@ export function ProfileFields({
 
           <Field
             label="How you write"
-            hint="Paste one message you have actually sent. Outreach copies the tone, never the content. Optional, but it is the difference between your voice and a template."
+            optional
+            hint="Paste one message you have actually sent. Outreach copies the tone, never the content. It is the difference between your voice and a template."
           >
             <textarea
               className="cw-input"
@@ -311,6 +466,43 @@ export function ProfileFields({
           </Field>
         </>
       )}
+    </div>
+  );
+}
+
+/** A quiet nudge listing what is still missing, without blocking on it. */
+export function CompletenessBar({
+  form,
+  skillsText,
+}: {
+  form: ProfileDraft;
+  skillsText: string;
+}) {
+  const { percent, missing } = completeness(form, skillsText);
+  if (percent === 100) return null;
+  return (
+    <div className="cw-card-sm" style={{ padding: 16 }}>
+      <div className="cw-row" style={{ gap: 10 }}>
+        <span className="cw-label">Profile strength</span>
+        <span className="cw-mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 500 }}>
+          {percent}%
+        </span>
+      </div>
+      <div
+        style={{ marginTop: 10, height: 3, borderRadius: 3, background: "var(--rim)", overflow: "hidden" }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${percent}%`,
+            background: "var(--orange)",
+            transition: "width var(--t)",
+          }}
+        />
+      </div>
+      <p style={{ margin: "12px 0 0", fontSize: 12.5, lineHeight: 1.6, color: "var(--quiet)" }}>
+        Optional, but each one measurably improves the work: {missing.slice(0, 3).join("; ")}.
+      </p>
     </div>
   );
 }
@@ -348,7 +540,7 @@ export function ProfileForm({
       const account = await ensureAccount();
       const saved = await api.saveProfile(account, {
         ...form,
-        portfolio: form.portfolio.filter((p) => p.title.trim() && p.summary.trim()),
+        portfolio: usableportfolio(form),
       });
       setStatus("saved");
       onSaved?.(saved);
@@ -360,6 +552,8 @@ export function ProfileForm({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <CompletenessBar form={form} skillsText={skillsText} />
+
       <ProfileFields
         form={form}
         setForm={setForm}
@@ -368,11 +562,7 @@ export function ProfileForm({
       />
 
       <div className="cw-row">
-        <button
-          className="cw-btn cw-btn-primary"
-          onClick={save}
-          disabled={status === "saving"}
-        >
+        <button className="cw-btn cw-btn-primary" onClick={save} disabled={status === "saving"}>
           {status === "saving" ? "Saving…" : submitLabel}
         </button>
         {status === "saved" && !onSaved && (

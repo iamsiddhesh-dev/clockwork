@@ -77,14 +77,27 @@ export type Profile = {
   id?: string;
   user_id?: string;
   name: string;
+  /** The headline under the name, Upwork-style: "Backend engineer ·
+   *  payments". Frames every pitch and sharpens fit scoring. */
+  title: string | null;
   /** Contact data, not a credential -- nothing signs in with it. */
   email: string | null;
   skills: string[];
+  years_experience: number | null;
   rates: { hourly?: number; currency?: string; [key: string]: unknown };
+  /** The floor. score_fit marks a posting down when its budget is
+   *  clearly under this. */
+  min_project_budget: number | null;
+  /** Hours a week genuinely available -- what separates a freelancer
+   *  from a job applicant, and what catches full-time roles wearing a
+   *  contract label. */
+  availability_hours: number | null;
+  /** Stored as `positioning`; presented as "Overview". */
   positioning: string | null;
   voice_samples: string[];
   portfolio: PortfolioItem[];
   payment_terms: string | null;
+  timezone?: string | null;
 };
 
 export type Opportunity = {
