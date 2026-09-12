@@ -147,7 +147,7 @@ export function ProfileFields({
             />
           </Field>
 
-          <Field label="Professional title" required hint="Pick one or type your own." htmlFor={titleId}>
+          <Field label="Professional title" required htmlFor={titleId}>
             <Combobox
               id={titleId}
               value={form.title ?? ""}
@@ -157,7 +157,7 @@ export function ProfileFields({
             />
           </Field>
 
-          <Field label="Email" required hint="Where clients reply. Not a login." htmlFor={emailId}>
+          <Field label="Email" required htmlFor={emailId}>
             <input
               id={emailId}
               className="cw-input"
@@ -347,7 +347,7 @@ function ProofFields({
         />
       </Field>
 
-      <Field label="LinkedIn" hint="Saved for clients. LinkedIn blocks reading, so it isn't scanned.">
+      <Field label="LinkedIn" hint="Stored, not scanned.">
         <input
           className="cw-input"
           value={links.linkedin ?? ""}

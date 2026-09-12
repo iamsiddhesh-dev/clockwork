@@ -1,9 +1,17 @@
 /**
  * Workspace identity, client side.
  *
- * There is no sign-in. Filling in the onboarding form creates a
- * workspace, and its id lives in a cookie from then on. Every API call
- * sends that id; the backend (apps/agent's auth.py) resolves it.
+ * Filling in the onboarding form creates a workspace, and its id lives in
+ * a cookie from then on. Every API call sends that id; the backend
+ * (apps/agent's auth.py) resolves it.
+ *
+ * The cookie used to be the *only* way back to a workspace, which meant
+ * clearing it -- a new browser, a cleared cache, a tidy-up -- left every
+ * row sitting in the database with no door left to reach it through.
+ * From the outside that is indistinguishable from the app never having
+ * saved anything. `signIn` is that door: the email given during
+ * onboarding finds the workspace again. It is a handle rather than a
+ * credential, which auth.py and the sign-in screen both say plainly.
  *
  * The cookie is deliberately NOT httpOnly: server components read it to
  * decide routing, client components read it to call the API, and there
@@ -36,6 +44,12 @@ export function writeAccount(id: string) {
   document.cookie = `${ACCOUNT_COOKIE}=${encodeURIComponent(id)}; Path=/; Max-Age=${MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
 }
 
+/**
+ * Log out. Only forgets the id in this browser -- the workspace and
+ * everything in it stays exactly where it was, and signing in with the
+ * same email comes straight back to it. Deleting is a different button
+ * and a different route.
+ */
 export function clearAccount() {
   document.cookie = `${ACCOUNT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
 }
@@ -52,6 +66,25 @@ export async function createAccount(): Promise<string> {
 /** Returns the current workspace, creating one if this browser has none. */
 export async function ensureAccount(): Promise<string> {
   return readAccount() ?? (await createAccount());
+}
+
+/**
+ * Sign back into an existing workspace with the email it was onboarded
+ * with. Throws a message worth reading if there isn't one.
+ */
+export async function signIn(email: string): Promise<string> {
+  const res = await fetch(`${API_URL}/accounts/signin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: email.trim() }),
+  });
+  if (res.status === 404) {
+    throw new Error("No workspace with that email. Set one up instead.");
+  }
+  if (!res.ok) throw new Error(`Couldn't sign in (${res.status})`);
+  const { account_id } = (await res.json()) as { account_id: string };
+  writeAccount(account_id);
+  return account_id;
 }
 
 /** For client components that must have a workspace already. Throws

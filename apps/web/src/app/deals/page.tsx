@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, compactMoney, Empty, PageHead } from "@/components/ui";
+import { Pager } from "@/components/pager";
+import { offsetFor, PAGE_SIZE, pageFrom, pageHref } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +24,15 @@ const STAGE_TONE: Record<string, string> = {
   lost: "var(--quiet)",
 };
 
-export default async function DealsPage() {
+export default async function DealsPage({ searchParams }: PageProps<"/deals">) {
   const account = await requireAccount();
-  const deals = await api.listDeals(account).catch(() => null);
-  if (!deals) return <ApiDown what="Deals" />;
+  const page = pageFrom(await searchParams);
+  const result = await api
+    .listDeals(account, { limit: PAGE_SIZE, offset: offsetFor(page) })
+    .catch(() => null);
+  if (!result) return <ApiDown what="Deals" />;
 
+  const { items: deals, total } = result;
   const pipeline = deals
     .filter((d) => d.stage !== "lost" && d.stage !== "won")
     .reduce((sum, d) => sum + (d.estimated_value ?? 0), 0);
@@ -41,9 +47,9 @@ export default async function DealsPage() {
             className="cw-mono"
             style={{ margin: 0, fontSize: 11, lineHeight: 1.6, color: "var(--quiet)", textAlign: "right" }}
           >
-            {deals.length} deal{deals.length === 1 ? "" : "s"}
+            {total} deal{total === 1 ? "" : "s"}
             <br />
-            {compactMoney(pipeline)} open
+            {compactMoney(pipeline)} open on this page
           </p>
         }
       />
@@ -121,6 +127,14 @@ export default async function DealsPage() {
             ))}
         </div>
       )}
+
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        noun="deal"
+        href={(n) => pageHref("/deals", n)}
+      />
     </>
   );
 }

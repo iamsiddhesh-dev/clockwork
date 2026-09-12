@@ -11,6 +11,10 @@ export default async function MoneyPage() {
   const [quotes, invoices, deals] = await Promise.all([
     api.listQuotes(account).catch(() => null),
     api.listInvoices(account).catch(() => null),
+    // Unpaginated on purpose: the board decides which deals are still
+    // quotable by checking every deal against every live quote, so a
+    // partial read here would offer to re-quote something already
+    // quoted. See the /deals route's own note.
     api.listDeals(account).catch(() => null),
   ]);
 
@@ -27,7 +31,7 @@ export default async function MoneyPage() {
           </p>
         }
       />
-      <MoneyBoard initialQuotes={quotes} initialInvoices={invoices} deals={deals} />
+      <MoneyBoard initialQuotes={quotes} initialInvoices={invoices} deals={deals.items} />
     </>
   );
 }

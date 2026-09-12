@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, type KickoffResult, type Profile } from "@/lib/api";
 import { ensureAccount } from "@/lib/account";
@@ -132,6 +133,16 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
             <span style={{ fontSize: 13, color: "var(--bad)", flex: "1 1 100%" }}>{stepError}</span>
           )}
         </div>
+
+        {stepIndex === 0 && (
+          <p style={{ margin: "22px 0 0", fontSize: 13, color: "var(--quiet)" }}>
+            Been here before?{" "}
+            <Link href="/signin" style={{ color: "var(--orange-ink)", fontWeight: 600 }}>
+              Open your workspace
+            </Link>
+            .
+          </p>
+        )}
       </Frame>
     );
   }

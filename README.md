@@ -60,13 +60,21 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 
 ### Tests
 
-88 tests, stdlib `unittest`, no install step:
+97 tests, stdlib `unittest`, no install step:
 
 ```bash
 cd apps/agent && PYTHONPATH=src python -m unittest discover -s tests -t .
 ```
 
-They cover the parts where being wrong costs real money or real leads: quote arithmetic and invoice numbering, payment-terms parsing, link classification (including the false-positive direction — a posting saying "applications close on 30 September" must not be marked closed), the exception-chain walk that a shipped bug got wrong, and the workflow-lane counting that another one got wrong. Every test is pure — no network, no database — so the suite runs in under 10ms.
+They cover the parts where being wrong costs real money or real leads: quote arithmetic and invoice numbering, payment-terms parsing, link classification (including the false-positive direction — a posting saying "applications close on 30 September" must not be marked closed), the exception-chain walk that a shipped bug got wrong, the workflow-lane counting that another one got wrong, and the page-window arithmetic behind every paginated list — off by one there silently repeats a row on one page and drops it from the next. Every test is pure — no network, no database — so the suite runs in under 10ms.
+
+### Lists are paginated, and the totals are counted, not guessed
+
+Every long list — opportunities, runs, threads, pipeline — is paged server-side with `?limit=&offset=`, and the unfiltered total rides back in an `X-Total-Count` header rather than being wrapped around the body, so the shape a caller parses does not change with the feature.
+
+The counts in each screen's header are counted in the database across the whole workspace, never from the rows in hand. "84 sourced · 61 scored" that becomes "10 sourced · 7 scored" as soon as paging arrives is a worse lie than no header at all. For the same reason, dismissed opportunities are excluded by the query rather than filtered out afterwards: filtering after paging is how a page of ten arrives holding seven, and the opportunity sort carries `id` as a final tiebreak so two equally-scored postings cannot swap places between the query for page one and the query for page two.
+
+Quotes and invoices are the deliberate exception. The Money board works out which deals are still quotable by comparing every deal against every live quote, so a half-read list there would offer to re-quote work already quoted.
 
 ### The tools
 
@@ -125,6 +133,7 @@ apps/agent/db/006_accounts.sql
 apps/agent/db/007_profile_fields.sql
 apps/agent/db/008_link_verification.sql
 apps/agent/db/009_profile_links.sql
+apps/agent/db/010_account_identity.sql
 
 # 2. Backend
 cd apps/agent
@@ -139,7 +148,9 @@ cp .env.example .env.local  # NEXT_PUBLIC_API_URL
 npm install && npm run dev
 ```
 
-Then open `http://localhost:3000`. There is no sign-in: the onboarding form is the front door, and filling it in creates your workspace.
+Then open `http://localhost:3000`. The onboarding form is the front door: filling it in creates your workspace, and you are only asked for it once — a browser that already has a profile goes straight to the dashboard.
+
+Your work is kept until you delete it. The email you onboard with is also how you get back: **Log out** in Settings forgets this browser, `/signin` takes that email and reopens the same workspace, and **Delete this account** removes the workspace and everything in it for good. That last one is a real delete — every table cascades off the account row, and nothing is soft-deleted or kept behind the scenes.
 
 Onboarding asks for three things and reads the rest. Who you are, what you charge, and where your work lives — then it fetches your GitHub and your site, extracts your skills and past results, and shows them back for you to edit. It does **not** ask you to type your own case studies into a form, because nobody enjoys that and no client asks for it either.
 
@@ -186,8 +197,9 @@ apps/web/            Next.js 16 (App Router)
     opportunities/   sourced leads, ranked by fit
     money/           quotes and invoices — accept, decline, mark paid, chase
     runs/            Run Trace — live SSE replay of any agent run
-    settings/        profile, spend cap, intake link, locked approval gate
+    settings/        profile, spend cap, intake link, account, locked approval gate
     search/          cross-entity search
+    signin/          the way back to a workspace whose cookie is gone
     intake/[id]/     the public lead-capture form (no workspace needed)
 ```
 
@@ -200,7 +212,11 @@ Stated plainly, because a demo that hides these is worth less than one that does
 - **Email is not wired.** Approving a message records it as sent and updates the thread; it does not transmit. Gmail's `gmail.send` is a restricted scope requiring a CASA Tier 2 audit, which is not achievable in a hackathon window, so it was deliberately deferred rather than half-built.
 - **No payment processor.** Marking an invoice paid is a human action. There is no Stripe integration, no card data, and nothing here can move money — taking payment is not something this agent should be able to do, and faking a processor for a demo would misrepresent where the human stays in the loop.
 - **No tax handling on quotes.** VAT and sales tax depend on both parties' jurisdictions, which is a real compliance question rather than one to guess at. `subtotal` and `total` are separate columns so adding it later needs no migration.
-- **There is no authentication.** A workspace is created by filling in the onboarding form and identified from then on by an unguessable id in a cookie. Anyone holding that id can read and write that workspace — no password, no expiry, no revocation. That is a deliberate trade for a demo whose data you typed in thirty seconds ago, and the wrong trade for real client correspondence. `auth.py` says so in its own docstring rather than letting a UUID imply more than it delivers.
+- **There is no authentication.** A workspace is created by filling in the onboarding form and identified from then on by an unguessable id in a cookie. Anyone holding that id can read and write that workspace — no password, no expiry, no revocation.
+
+  Signing in by email is weaker still, and deliberately so. The cookie was previously the *only* route back, so clearing it stranded every row in the database behind a door that no longer existed — which is indistinguishable, from the outside, from the app never having saved anything. `/signin` trades some of the UUID's unguessability for a door the owner can find again: give the email you onboarded with and you get the workspace. No password, no verification, so anyone who knows that address can do the same.
+
+  Both are acceptable for a demo whose data you typed in thirty seconds ago and the wrong trade for real client correspondence. `auth.py` and the Settings screen say so plainly rather than letting the word "sign in" imply a boundary that is not there.
 - **No email is sent, so nothing here has a delivery guarantee.** See the first limit above.
 
 ## Licence

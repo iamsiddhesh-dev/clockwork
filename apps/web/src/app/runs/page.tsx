@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
+import { Pager } from "@/components/pager";
+import { offsetFor, PAGE_SIZE, pageFrom, pageHref } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
@@ -12,11 +14,19 @@ const STATUS_TONE: Record<string, string> = {
   failed: "var(--bad)",
 };
 
-export default async function RunsPage() {
+export default async function RunsPage({ searchParams }: PageProps<"/runs">) {
   const account = await requireAccount();
-  const runs = await api.listRuns(account).catch(() => null);
-  if (!runs) return <ApiDown what="Runs" />;
+  const page = pageFrom(await searchParams);
+  const result = await api
+    .listRuns(account, { limit: PAGE_SIZE, offset: offsetFor(page) })
+    .catch(() => null);
+  if (!result) return <ApiDown what="Runs" />;
 
+  const { items: runs, total } = result;
+  // Deliberately scoped to this page and labelled as such. Summing what
+  // is in hand and calling it the total would quietly under-report the
+  // moment there is a second page -- and cost is the number this project
+  // is least entitled to be loose about.
   const spend = runs.reduce((sum, run) => sum + Number(run.total_cost_usd ?? 0), 0);
 
   return (
@@ -35,8 +45,8 @@ export default async function RunsPage() {
               textAlign: "right",
             }}
           >
-            {runs.length} run{runs.length === 1 ? "" : "s"}
-            <br />${spend.toFixed(4)} total
+            {total} run{total === 1 ? "" : "s"}
+            <br />${spend.toFixed(4)} on this page
           </p>
         }
       />
@@ -101,6 +111,14 @@ export default async function RunsPage() {
           ))}
         </div>
       )}
+
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        noun="run"
+        href={(n) => pageHref("/runs", n)}
+      />
     </>
   );
 }

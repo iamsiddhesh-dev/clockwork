@@ -3,13 +3,20 @@ import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
+import { Pager } from "@/components/pager";
+import { offsetFor, PAGE_SIZE, pageFrom, pageHref } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
-export default async function ThreadsPage() {
+export default async function ThreadsPage({ searchParams }: PageProps<"/threads">) {
   const account = await requireAccount();
-  const threads = await api.listThreads(account).catch(() => null);
-  if (!threads) return <ApiDown what="Threads" />;
+  const page = pageFrom(await searchParams);
+  const result = await api
+    .listThreads(account, { limit: PAGE_SIZE, offset: offsetFor(page) })
+    .catch(() => null);
+  if (!result) return <ApiDown what="Threads" />;
+
+  const { items: threads, total } = result;
 
   return (
     <>
@@ -18,7 +25,7 @@ export default async function ThreadsPage() {
         title="Conversations"
         aside={
           <p className="cw-mono" style={{ margin: 0, fontSize: 11, color: "var(--quiet)" }}>
-            {threads.length} thread{threads.length === 1 ? "" : "s"}
+            {total} thread{total === 1 ? "" : "s"}
           </p>
         }
       />
@@ -65,6 +72,14 @@ export default async function ThreadsPage() {
           ))}
         </div>
       )}
+
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        noun="thread"
+        href={(n) => pageHref("/threads", n)}
+      />
     </>
   );
 }

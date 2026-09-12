@@ -4,6 +4,9 @@ Routes:
   POST  /runs                      -> run_agent(), returns run_id
   GET   /runs                      -> list recent runs (Run Trace panel)
   POST  /accounts                  -> create a workspace (onboarding step 1)
+  POST  /accounts/signin           -> find the workspace behind an email
+  GET   /accounts/me               -> which workspace this is, and its email
+  DELETE /accounts/me              -> delete the workspace and everything in it
   GET   /runs/{id}/events?account= -> SSE stream of agent_event rows
   GET   /threads                   -> list threads (Threads view)
   GET   /threads/{id}              -> thread + messages + its deal
@@ -37,7 +40,12 @@ Gmail OAuth (inbound polling / send) is not wired here yet -- see
 executor.py's TODO. It needs a Google Cloud console app set up by hand
 before any code can use it.
 
-Identity: every route above except /accounts, /intake and /health
+Lists are paginated: `?limit=&offset=`, with the unfiltered total in
+an `X-Total-Count` response header rather than wrapped around the body,
+so the shape a caller parses does not change with the feature.
+
+Identity: every route above except /accounts, /accounts/signin, /intake
+and /health
 requires an `X-Clockwork-Account: <uuid>` header naming an existing
 workspace (see auth.py, which is explicit that this identifies rather
 than authenticates). Every route that touches one specific resource (a
@@ -60,14 +68,23 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import clock
 from .agent import Trigger, run_agent
-from .auth import account_from_query, create_account, get_current_user_id, resolve_account
+from .auth import (
+    account_from_query,
+    claim_email,
+    create_account,
+    delete_account,
+    get_account,
+    get_current_user_id,
+    resolve_account,
+    sign_in,
+)
 from .context import run_context
 from .db import get_client
 from .executor import execute_approval
@@ -116,7 +133,48 @@ app.add_middleware(
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
+    # Without this the browser hands the frontend a response whose
+    # X-Total-Count it is not allowed to read -- pagination would then
+    # silently believe every list is one page long.
+    expose_headers=["X-Total-Count"],
 )
+
+
+# ── pagination ──────────────────────────────────────────────────────────
+#
+# One page size cap for every list. The total goes in a header rather
+# than changing `list[dict]` into `{"items": [...], "total": n}`: the body
+# stays exactly what it always was, so nothing that already reads these
+# routes breaks, and a caller that does not care about paging can keep
+# ignoring it.
+
+PAGE_MAX = 200
+
+
+def page_window(limit: int, offset: int) -> tuple[int, int]:
+    """Clamp what the query string asked for.
+
+    A negative offset makes PostgREST's range nonsensical rather than
+    empty, and an unbounded limit turns one careless URL into a full table
+    scan sent over the wire.
+    """
+    return max(1, min(int(limit), PAGE_MAX)), max(0, int(offset))
+
+
+def paginate(query, response: Response, limit: int, offset: int) -> list[dict]:
+    """Run a counted query for one page and publish the full total.
+
+    The query must have been built with `select(..., count="exact")` --
+    without it PostgREST returns no count and the total would quietly
+    become "however many rows this page happens to hold", which is the
+    exact bug that makes a pager stop one page early.
+    """
+    limit, offset = page_window(limit, offset)
+    res = query.range(offset, offset + limit - 1).execute()
+    rows = res.data or []
+    total = res.count if getattr(res, "count", None) is not None else offset + len(rows)
+    response.headers["X-Total-Count"] = str(total)
+    return rows
 
 
 @app.get("/health")
@@ -134,6 +192,37 @@ def post_account() -> dict:
     empty row and nothing else; a workspace with no profile is inert, so
     the worst an abusive caller achieves is empty rows."""
     return {"account_id": create_account()}
+
+
+class SignInBody(BaseModel):
+    email: str
+
+
+@app.post("/accounts/signin")
+def post_signin(body: SignInBody) -> dict:
+    """The way back in after a cookie is gone.
+
+    Open, like /accounts, and for the same reason: the caller has nothing
+    to identify themselves with -- that is what they are here to fix. See
+    auth.py on exactly how little this proves about who is asking.
+    """
+    return {"account_id": sign_in(body.email)}
+
+
+@app.get("/accounts/me")
+def get_me(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Which workspace this is. The Settings screen shows the email back
+    so someone can see what they would sign in with, rather than having
+    to remember which address they typed."""
+    return get_account(user_id)
+
+
+@app.delete("/accounts/me")
+def delete_me(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Delete the workspace and everything in it. Cascades -- see
+    auth.delete_account. There is no undo and none is implied."""
+    delete_account(user_id)
+    return {"deleted": True}
 
 
 # ── runs ────────────────────────────────────────────────────────────────
@@ -164,17 +253,20 @@ def create_run(req: RunRequest, user_id: str = Depends(get_current_user_id)) -> 
 
 
 @app.get("/runs")
-def list_runs(limit: int = 30, user_id: str = Depends(get_current_user_id)) -> list[dict]:
-    res = (
+def list_runs(
+    response: Response,
+    limit: int = 30,
+    offset: int = 0,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    query = (
         get_client()
         .table("agent_run")
-        .select("*")
+        .select("*", count="exact")
         .eq("user_id", user_id)
         .order("started_at", desc=True)
-        .limit(limit)
-        .execute()
     )
-    return res.data or []
+    return paginate(query, response, limit, offset)
 
 
 @app.get("/runs/{run_id}")
@@ -249,16 +341,20 @@ async def stream_run_events(run_id: str, user_id: str = Depends(account_from_que
 
 
 @app.get("/threads")
-def list_threads(user_id: str = Depends(get_current_user_id)) -> list[dict]:
-    res = (
+def list_threads(
+    response: Response,
+    limit: int = 25,
+    offset: int = 0,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    query = (
         get_client()
         .table("thread")
-        .select("*")
+        .select("*", count="exact")
         .eq("user_id", user_id)
         .order("last_message_at", desc=True, nullsfirst=False)
-        .execute()
     )
-    return res.data or []
+    return paginate(query, response, limit, offset)
 
 
 @app.get("/threads/{thread_id}")
@@ -368,30 +464,93 @@ def put_profile(body: ProfileBody, user_id: str = Depends(get_current_user_id)) 
     else:
         res = client.table("profile").insert({**payload, "user_id": user_id}).execute()
 
+    # The address onboarding just collected becomes the way back into
+    # this workspace if the cookie is ever lost. Done on every save, not
+    # only the first: correcting a typo here has to correct what you sign
+    # in with, or the correction is worse than the typo. Raises 409 if
+    # another workspace already holds it -- see auth.claim_email.
+    claim_email(user_id, payload.get("email"))
+
     return res.data[0]
 
 
 # ── opportunities (outbound sourcing) ───────────────────────────────────
 
+#: Marks a stats filter as "this column is set" rather than "this column
+#: equals something". A module-level sentinel rather than None, because
+#: None is a perfectly ordinary value to filter a column against.
+NOT_NULL = object()
+
 
 @app.get("/opportunities")
 def list_opportunities(
+    response: Response,
     status: str | None = None,
-    limit: int = 100,
+    limit: int = 20,
+    offset: int = 0,
+    include_dismissed: bool = False,
     user_id: str = Depends(get_current_user_id),
 ) -> list[dict]:
     """Best fit first. Unscored rows sort last rather than being hidden --
-    "not scored yet" is a real state the screen needs to show."""
-    query = get_client().table("opportunity").select("*").eq("user_id", user_id)
+    "not scored yet" is a real state the screen needs to show.
+
+    Dismissed rows are excluded here rather than filtered out by the
+    caller. Filtering after paging is how a page of twenty arrives
+    holding fourteen, and how a total of eighty-four describes a list
+    nobody can page to the end of.
+
+    The sort has `id` on the end for a reason: two postings with the same
+    fit score and no posted_at are otherwise in whatever order Postgres
+    felt like, which is free to differ between the query for page one and
+    the query for page two -- so a row can appear twice and another never
+    appear at all.
+    """
+    query = get_client().table("opportunity").select("*", count="exact").eq("user_id", user_id)
     if status:
         query = query.eq("status", status)
-    res = (
+    elif not include_dismissed:
+        query = query.neq("status", "dismissed")
+    query = (
         query.order("fit_score", desc=True, nullsfirst=False)
         .order("posted_at", desc=True, nullsfirst=False)
-        .limit(limit)
-        .execute()
+        .order("id")
     )
-    return res.data or []
+    return paginate(query, response, limit, offset)
+
+
+@app.get("/opportunities/stats")
+def opportunity_stats(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Totals for the whole workspace, not for whichever page is on
+    screen.
+
+    The header on the Opportunities screen reads "84 sourced, 61 scored".
+    Once the list is paged, counting the rows in hand would turn that
+    into "20 sourced, 14 scored" -- a number that shrinks as you paginate
+    is worse than no number. These are counted in the database, over
+    everything, with `head=True` so no rows come back at all.
+    """
+    client = get_client()
+
+    def count(**filters) -> int:
+        query = (
+            client.table("opportunity")
+            .select("id", count="exact", head=True)
+            .eq("user_id", user_id)
+            .neq("status", "dismissed")
+        )
+        for column, value in filters.items():
+            query = query.not_.is_(column, "null") if value is NOT_NULL else query.eq(column, value)
+        return query.execute().count or 0
+
+    by_source: dict[str, int] = {}
+    for source in ensure_sources(user_id):
+        by_source[source["id"]] = count(source_id=source["id"])
+
+    return {
+        "total": count(),
+        "scored": count(fit_score=NOT_NULL),
+        "by_source": by_source,
+    }
 
 
 @app.get("/sources")
@@ -573,16 +732,24 @@ def get_overview(user_id: str = Depends(get_current_user_id)) -> dict:
 
 
 @app.get("/deals")
-def list_deals(user_id: str = Depends(get_current_user_id)) -> list[dict]:
-    res = (
+def list_deals(
+    response: Response,
+    limit: int = 200,
+    offset: int = 0,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    """Defaults to a wide page on purpose. The Money screen works out
+    which deals are still quotable by comparing every deal against every
+    live quote, and a half-read list there would offer to quote something
+    already quoted. The pipeline screen asks for a real page size."""
+    query = (
         get_client()
         .table("deal")
-        .select("*")
+        .select("*", count="exact")
         .eq("user_id", user_id)
         .order("updated_at", desc=True)
-        .execute()
     )
-    return res.data or []
+    return paginate(query, response, limit, offset)
 
 
 @app.post("/deals/{deal_id}/quote")

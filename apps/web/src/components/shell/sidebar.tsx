@@ -76,10 +76,11 @@ export function Sidebar() {
         padding: "22px 14px",
         borderRight: "1px solid var(--rim)",
         background: "var(--glass)",
-        position: "sticky",
-        top: 0,
-        maxHeight: "100vh",
-        overflowY: "auto",
+        // Height and its own scrolling are set in globals.css, and only
+        // above the breakpoint where this is visible at all. It was
+        // `position: sticky` here, which never worked: .cw-shell sets
+        // `overflow: hidden`, so it became the sticky container, and
+        // nothing can stick to a box that does not scroll.
       }}
     >
       <Link href="/overview" style={{ display: "flex", alignItems: "center", gap: 10, padding: "2px 8px 0" }}>

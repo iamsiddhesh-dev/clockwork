@@ -3,20 +3,28 @@ import { NextResponse, type NextRequest } from "next/server";
 // Next.js 16 renamed `middleware.ts` to `proxy.ts` (same mechanism,
 // `middleware.js` is deprecated -- see node_modules/next/dist/docs).
 //
-// There is no sign-in any more, so this no longer refreshes a session or
-// bounces anyone to a login page. It does one thing: a browser with no
-// workspace cookie has nothing to look at, so send it to onboarding,
-// which is now the front door.
+// This does one thing: a browser with no workspace cookie has nothing to
+// look at, so send it to onboarding, which is the front door. It does not
+// verify anything -- the cookie is a workspace id, not a session, and
+// auth.py is explicit that holding one identifies rather than
+// authenticates.
 const ACCOUNT_COOKIE = "cw_account";
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Onboarding is where a cookie-less visitor is supposed to end up, so
-  // it must never redirect to itself. /intake is the public lead-capture
-  // form -- the person filling it in is a stranger with no workspace,
-  // which is the whole point of it, so it must never be gated either.
-  if (pathname.startsWith("/onboarding") || pathname.startsWith("/intake/")) {
+  // it must never redirect to itself. Nor may /signin: someone whose
+  // cookie is gone is *by definition* cookie-less, and gating the one
+  // screen that gets it back would make losing a cookie unrecoverable --
+  // which is the bug this whole route exists to fix. /intake is the
+  // public lead-capture form -- the person filling it in is a stranger
+  // with no workspace, which is the whole point of it.
+  if (
+    pathname.startsWith("/onboarding") ||
+    pathname.startsWith("/signin") ||
+    pathname.startsWith("/intake/")
+  ) {
     return NextResponse.next();
   }
 

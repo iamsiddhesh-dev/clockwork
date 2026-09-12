@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Option } from "@/lib/reference";
 
 /**
@@ -52,10 +53,82 @@ export function Field({
   );
 }
 
-/** Shared dropdown surface. */
-function Menu({ children, onMouseDown }: { children: React.ReactNode; onMouseDown?: () => void }) {
-  return (
+/**
+ * Shared dropdown surface.
+ *
+ * Rendered into <body> rather than next to the field, which is not a
+ * detail: `backdrop-filter` can only blur what was painted *underneath*
+ * it. In the form, everything after the field -- the next input, the
+ * Continue button -- paints later, so it was never part of the menu's
+ * backdrop. A z-index put the menu on top of those, but they arrived
+ * unblurred behind a translucent panel, so a button read straight
+ * through a list that was supposed to have your attention. No amount of
+ * blur fixes that; only being last in the paint order does.
+ *
+ * Portalling also stops the menu being clipped by any scrolling ancestor,
+ * which is the other half of why production comboboxes all do this.
+ *
+ * The cost is that position has to be measured rather than inherited,
+ * and re-measured when anything moves -- hence the scroll listener in
+ * the capture phase, which catches scrolling in any container, not just
+ * the window.
+ */
+function Menu({
+  anchor,
+  menuRef,
+  children,
+  onMouseDown,
+}: {
+  anchor: React.RefObject<HTMLElement | null>;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  children: React.ReactNode;
+  onMouseDown?: () => void;
+}) {
+  const [box, setBox] = useState<{
+    left: number;
+    width: number;
+    top?: number;
+    bottom?: number;
+    maxHeight: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    function measure() {
+      const el = anchor.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const gap = 6;
+      const below = window.innerHeight - rect.bottom - gap - 8;
+      const above = rect.top - gap - 8;
+      // Flip up only when below is genuinely too cramped AND above is
+      // better, so a field near the bottom of a long form still opens
+      // the way people expect everywhere else.
+      const flip = below < 220 && above > below;
+      setBox({
+        left: rect.left,
+        width: rect.width,
+        ...(flip
+          ? { bottom: window.innerHeight - rect.top + gap }
+          : { top: rect.bottom + gap }),
+        maxHeight: Math.max(140, Math.min(320, flip ? above : below)),
+      });
+    }
+    measure();
+    // Capture phase: a scroll inside .cw-main does not bubble to window,
+    // and a menu left behind by its own field is worse than no menu.
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [anchor]);
+
+  if (!box || typeof document === "undefined") return null;
+
+  return createPortal(
     <div
+      ref={menuRef}
       onMouseDown={(e) => {
         // Keep focus in the input so blur doesn't close the menu before
         // the click registers -- the classic dropdown-that-won't-click bug.
@@ -63,23 +136,41 @@ function Menu({ children, onMouseDown }: { children: React.ReactNode; onMouseDow
         onMouseDown?.();
       }}
       style={{
-        position: "absolute",
-        zIndex: 40,
-        top: "calc(100% + 6px)",
-        left: 0,
-        right: 0,
-        maxHeight: 280,
+        position: "fixed",
+        zIndex: 90,
+        left: box.left,
+        width: box.width,
+        top: box.top,
+        bottom: box.bottom,
+        maxHeight: box.maxHeight,
         overflowY: "auto",
         border: "1px solid var(--rim2)",
         borderRadius: "var(--r-ctl)",
+        // Glass, which is a narrower target than it sounds. Nearly
+        // opaque and it reads as a black rectangle pasted over the
+        // interface -- the one element that ignores the material
+        // everything else is made of. Too thin and the page behind stays
+        // legible through the list, so two things compete for the same
+        // pixels and neither wins.
+        //
+        // Enough body to take the contrast out, and enough blur that
+        // what does come through arrives as colour rather than as text.
+        // The saturate keeps that colour alive instead of letting the
+        // blur grey it out, which is the difference between glass and
+        // frosted plastic.
         background: "var(--menu)",
-        backdropFilter: "blur(24px)",
-        boxShadow: "var(--hi), 0 24px 60px -30px rgba(0,0,0,.9)",
+        backdropFilter: "blur(52px) saturate(190%)",
+        WebkitBackdropFilter: "blur(52px) saturate(190%)",
+        // The inner hairline gives the edge thickness -- without it the
+        // panel looks printed on rather than laid over.
+        boxShadow:
+          "var(--hi), inset 0 0 0 1px rgba(255,255,255,.04), 0 28px 70px -24px rgba(0,0,0,.95)",
         padding: 5,
       }}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -124,6 +215,37 @@ function Row({
   );
 }
 
+/** The chevron that marks a field as a dropdown, and turns over when
+ *  it is open. Inert to the pointer so it never eats a click meant for
+ *  the input underneath it. */
+function Caret({ open }: { open: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        right: 12,
+        top: 22,
+        transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+        transition: "transform var(--t)",
+        pointerEvents: "none",
+        display: "flex",
+        color: "var(--quiet)",
+      }}
+    >
+      <svg width="11" height="7" viewBox="0 0 11 7" fill="none">
+        <path
+          d="M1 1.5 5.5 6 10 1.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 function GroupLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="cw-label" style={{ padding: "10px 11px 6px" }}>
@@ -161,6 +283,7 @@ export function Combobox({
   const [draft, setDraft] = useState("");
   const [highlight, setHighlight] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
 
   // What the input shows: the committed value when closed, the search
   // term while open.
@@ -170,8 +293,14 @@ export function Combobox({
   const matches = useMemo(() => {
     const term = draft.trim().toLowerCase();
     const pool = term
-      ? options.filter(
-          (o) => o.label.toLowerCase().includes(term) || o.value.toLowerCase().includes(term),
+      ? options.filter((o) =>
+          // `search` carries what someone actually types but the label
+          // does not show: a country, a nearby city, an abbreviation.
+          // Without it "India" matched nothing in a list of 418 time
+          // zones, because the row is spelled "Asia/Calcutta".
+          [o.label, o.value, o.hint, o.search]
+            .filter(Boolean)
+            .some((field) => field!.toLowerCase().includes(term)),
         )
       : options;
     return pool.slice(0, maxVisible);
@@ -180,7 +309,12 @@ export function Combobox({
   useEffect(() => {
     if (!open) return;
     function onDocDown(event: MouseEvent) {
-      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // The menu is portalled into <body>, so it is no longer inside
+      // `wrap` -- checking only that would treat every click on an
+      // option as a click outside and close the list before it landed.
+      if (wrap.current?.contains(target) || menu.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDocDown);
     return () => document.removeEventListener("mousedown", onDocDown);
@@ -239,11 +373,20 @@ export function Combobox({
           if (!strict) onChange(e.target.value);
         }}
         onKeyDown={onKeyDown}
-        style={{ cursor: strict && !open ? "pointer" : "text" }}
+        style={{
+          cursor: strict && !open ? "pointer" : "text",
+          // Room for the chevron, so a long value does not run underneath it.
+          paddingRight: 34,
+        }}
       />
 
+      {/* Without this nothing on screen says the field has a list behind
+          it -- it looks like a text box, so people type into it and never
+          discover the options. */}
+      <Caret open={open} />
+
       {open && (
-        <Menu>
+        <Menu anchor={wrap} menuRef={menu}>
           {matches.length === 0 ? (
             <div style={{ padding: "12px 11px", fontSize: 13, color: "var(--quiet)" }}>
               {strict ? "No match." : "Nothing on the list — what you typed will be used."}
@@ -298,6 +441,7 @@ export function TagInput({
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
 
   const lower = useMemo(() => new Set(values.map((v) => v.toLowerCase())), [values]);
 
@@ -312,7 +456,10 @@ export function TagInput({
   useEffect(() => {
     if (!open) return;
     function onDocDown(event: MouseEvent) {
-      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // See the same handler in Combobox: the menu lives in <body> now.
+      if (wrap.current?.contains(target) || menu.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDocDown);
     return () => document.removeEventListener("mousedown", onDocDown);
@@ -331,6 +478,11 @@ export function TagInput({
     onChange([...values, skill]);
     setDraft("");
     setHighlight(0);
+    // Picking one is the end of that interaction. Leaving the list up
+    // meant it sat over the chips that had just been added, so you could
+    // not see the thing you had chosen -- and the next keystroke brings
+    // it straight back anyway.
+    setOpen(false);
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
@@ -415,6 +567,11 @@ export function TagInput({
           value={draft}
           placeholder={values.length ? "" : placeholder}
           onFocus={() => setOpen(true)}
+          // Focus does not fire again after picking a skill -- the input
+          // never lost it -- so without this the list could only be
+          // brought back by typing. Clicking the field is the other way
+          // people expect to ask for it.
+          onClick={() => setOpen(true)}
           onChange={(e) => {
             const next = e.target.value;
             // A pasted comma-separated list is a normal thing to do.
@@ -442,7 +599,7 @@ export function TagInput({
       </div>
 
       {open && matches.length > 0 && (
-        <Menu>
+        <Menu anchor={wrap} menuRef={menu}>
           {matches.map((skill, index) => (
             <Row key={skill} active={index === highlight} onClick={() => add(skill)}>
               {skill}

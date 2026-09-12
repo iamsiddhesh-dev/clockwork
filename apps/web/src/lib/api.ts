@@ -154,6 +154,14 @@ export type LinkCheckReport = {
   skipped: number;
 };
 
+/** Counted in the database over every non-dismissed row, which is why
+ *  the screen's header stays true on page four. */
+export type OpportunityStats = {
+  total: number;
+  scored: number;
+  by_source: Record<string, number>;
+};
+
 export type Source = {
   id: string;
   kind: string;
@@ -251,6 +259,15 @@ export type SearchResult = {
   note: string | null;
 };
 
+export type AccountRecord = {
+  id: string;
+  /** The address this workspace can be signed back into with. Null for
+   *  a workspace created before sign-in existed, or by the seed script. */
+  email: string | null;
+  created_at: string;
+  last_seen_at: string;
+};
+
 export type Summary = {
   now: string;
   pending_approvals: number;
@@ -345,7 +362,7 @@ export type AgentEvent = {
   created_at: string;
 };
 
-async function apiFetch<T>(path: string, account: string, init?: RequestInit): Promise<T> {
+async function request(path: string, account: string, init?: RequestInit) {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
@@ -358,8 +375,48 @@ async function apiFetch<T>(path: string, account: string, init?: RequestInit): P
     const body = await res.text().catch(() => "");
     throw new Error(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
   }
+  return res;
+}
+
+async function apiFetch<T>(path: string, account: string, init?: RequestInit): Promise<T> {
+  const res = await request(path, account, init);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+/** One page of a list, and how many there are in total. */
+export type Page<T> = { items: T[]; total: number };
+
+export type PageQuery = { limit?: number; offset?: number };
+
+export function pageQuery({ limit, offset }: PageQuery = {}): string {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set("limit", String(limit));
+  if (offset) params.set("offset", String(offset));
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/**
+ * A list route, plus the total the backend put in `X-Total-Count`.
+ *
+ * If that header is missing the total falls back to what actually
+ * arrived rather than to zero, so a pager renders "1-20 of 20" instead
+ * of claiming an empty list it just finished drawing. It goes missing
+ * for a real reason and not only in theory: the header has to be named
+ * in the API's CORS `expose_headers`, and without that the browser hands
+ * this code a response it is not allowed to read it from.
+ */
+async function apiPage<T>(
+  path: string,
+  account: string,
+  init?: RequestInit,
+): Promise<Page<T>> {
+  const res = await request(path, account, init);
+  const items = (await res.json()) as T[];
+  const header = res.headers.get("X-Total-Count");
+  const total = header === null ? items.length : Number(header);
+  return { items, total: Number.isFinite(total) ? total : items.length };
 }
 
 export const api = {
@@ -375,8 +432,8 @@ export const api = {
       body: JSON.stringify({ payload }),
     }),
 
-  listThreads: (account: string) =>
-    apiFetch<Thread[]>(`/threads`, account, { cache: "no-store" }),
+  listThreads: (account: string, page?: PageQuery) =>
+    apiPage<Thread>(`/threads${pageQuery(page)}`, account, { cache: "no-store" }),
   getThread: (account: string, id: string) =>
     apiFetch<{ thread: Thread; messages: Message[]; deal: Deal | null }>(`/threads/${id}`, account, {
       cache: "no-store",
@@ -390,7 +447,8 @@ export const api = {
   overview: (account: string) =>
     apiFetch<Overview>(`/overview`, account, { cache: "no-store" }),
 
-  listDeals: (account: string) => apiFetch<Deal[]>(`/deals`, account, { cache: "no-store" }),
+  listDeals: (account: string, page?: PageQuery) =>
+    apiPage<Deal>(`/deals${pageQuery(page)}`, account, { cache: "no-store" }),
   quoteDeal: (account: string, dealId: string) =>
     apiFetch<{ approval_id: string; quote_id: string; total: number; currency: string; body: string }>(
       `/deals/${dealId}/quote`,
@@ -419,8 +477,12 @@ export const api = {
   chaseInvoice: (account: string, id: string) =>
     apiFetch<ChaseResult>(`/invoices/${id}/chase`, account, { method: "POST" }),
 
-  listOpportunities: (account: string) =>
-    apiFetch<Opportunity[]>(`/opportunities`, account, { cache: "no-store" }),
+  listOpportunities: (account: string, page?: PageQuery) =>
+    apiPage<Opportunity>(`/opportunities${pageQuery(page)}`, account, { cache: "no-store" }),
+  /** Totals across the whole workspace, not across the page on screen --
+   *  a count that shrinks as you paginate is worse than no count. */
+  opportunityStats: (account: string) =>
+    apiFetch<OpportunityStats>(`/opportunities/stats`, account, { cache: "no-store" }),
   listSources: (account: string) =>
     apiFetch<Source[]>(`/sources`, account, { cache: "no-store" }),
   syncOpportunities: (account: string) =>
@@ -466,8 +528,10 @@ export const api = {
   saveProfile: (account: string, profile: Omit<Profile, "id" | "user_id">) =>
     apiFetch<Profile>(`/profile`, account, { method: "PUT", body: JSON.stringify(profile) }),
 
-  listRuns: (account: string, limit = 30) =>
-    apiFetch<AgentRun[]>(`/runs?limit=${limit}`, account, { cache: "no-store" }),
+  listRuns: (account: string, page?: PageQuery) =>
+    apiPage<AgentRun>(`/runs${pageQuery({ limit: 20, ...page })}`, account, {
+      cache: "no-store",
+    }),
   getRun: (account: string, id: string) =>
     apiFetch<AgentRun>(`/runs/${id}`, account, { cache: "no-store" }),
 
@@ -476,6 +540,14 @@ export const api = {
    * apps/agent's /runs/{id}/events route). */
   runEventsUrl: (account: string, runId: string) =>
     `${API_URL}/runs/${runId}/events?account=${encodeURIComponent(account)}`,
+
+  /** Who this workspace is -- shown in Settings so someone can see
+   *  which address they would sign back in with. */
+  getAccount: (account: string) =>
+    apiFetch<AccountRecord>(`/accounts/me`, account, { cache: "no-store" }),
+  /** Deletes the workspace and everything in it. No undo. */
+  deleteAccount: (account: string) =>
+    apiFetch<{ deleted: boolean }>(`/accounts/me`, account, { method: "DELETE" }),
 
   clock: (account: string) => apiFetch<{ now: string }>(`/clock`, account, { cache: "no-store" }),
   advanceClock: (account: string, days: number) =>

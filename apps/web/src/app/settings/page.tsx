@@ -7,9 +7,10 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const account = await requireAccount();
-  const [profile, summary] = await Promise.all([
+  const [profile, summary, record] = await Promise.all([
     api.getProfile(account).catch(() => null),
     api.summary(account).catch(() => null),
+    api.getAccount(account).catch(() => null),
   ]);
 
   return (
@@ -18,7 +19,11 @@ export default async function SettingsPage() {
         kicker="Settings"
         title="What the agent knows, and what it may do"
       />
-      <SettingsView profile={profile} dailyCapUsd={summary?.daily_cap_usd ?? 5} />
+      <SettingsView
+        profile={profile}
+        account={record}
+        dailyCapUsd={summary?.daily_cap_usd ?? 5}
+      />
     </>
   );
 }

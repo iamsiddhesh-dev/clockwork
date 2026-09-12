@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { api, type Opportunity, type Source } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { requireAccountClient } from "@/lib/account";
 import { Empty } from "@/components/ui";
+import { Pager } from "@/components/pager";
 
 const SOURCE_LABEL: Record<string, string> = {
   hacker_news: "Hacker News",
@@ -55,16 +57,27 @@ const STATUS_LABEL: Record<Opportunity["status"], string> = {
 
 export function OpportunityList({
   initial,
+  total: initialTotal,
+  pageSize,
   sources,
   hasProfile,
 }: {
   initial: Opportunity[];
+  total: number;
+  pageSize: number;
   sources: Source[];
   /** `undefined` means the profile could not be read, which is not the
    *  same as there not being one -- see the page's comment. */
   hasProfile: boolean | undefined;
 }) {
+  const router = useRouter();
   const [items, setItems] = useState(initial);
+  const [total, setTotal] = useState(initialTotal);
+  // Paged in state rather than in the URL, unlike every other list here.
+  // This screen fetches, scores, checks links and dismisses rows in
+  // place; navigating to change page would throw that away and re-run
+  // the server render underneath it.
+  const [page, setPage] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,9 +87,29 @@ export function OpportunityList({
     [sources],
   );
 
-  const refresh = useCallback(async () => {
-    setItems(await api.listOpportunities(requireAccountClient()));
-  }, []);
+  const load = useCallback(
+    async (target: number) => {
+      const result = await api.listOpportunities(requireAccountClient(), {
+        limit: pageSize,
+        offset: (target - 1) * pageSize,
+      });
+      // Dismissing the last row on the last page leaves that page empty
+      // and unreachable-looking. Step back rather than showing a blank
+      // list under a pager that says there are items.
+      if (result.items.length === 0 && target > 1 && result.total > 0) {
+        return load(Math.min(target - 1, Math.max(1, Math.ceil(result.total / pageSize))));
+      }
+      setItems(result.items);
+      setTotal(result.total);
+      setPage(target);
+      // The header's counts are server-rendered from the whole
+      // workspace, so they go stale whenever this changes the data.
+      router.refresh();
+    },
+    [pageSize, router],
+  );
+
+  const refresh = useCallback(() => load(page), [load, page]);
 
   const run = useCallback(
     async (key: string, fn: (account: string) => Promise<string | null>) => {
@@ -97,18 +130,25 @@ export function OpportunityList({
   );
 
   async function handleDismiss(id: string) {
+    // Optimistic: the card goes immediately, then the page is re-read so
+    // the row that moved up from the next page takes its place rather
+    // than leaving a gap until something else triggers a fetch.
     setItems((prev) => prev.filter((o) => o.id !== id));
+    setTotal((n) => Math.max(0, n - 1));
     try {
       await api.dismissOpportunity(requireAccountClient(), id);
+      await refresh();
     } catch (err) {
       setError((err as Error).message);
       await refresh();
     }
   }
 
-  const visible = items
-    .filter((o) => o.status !== "dismissed")
-    .sort((a, b) => (b.fit_score ?? -1) - (a.fit_score ?? -1));
+  // Dismissed rows are excluded by the API now, not here: filtering
+  // after paging is how a page of ten arrives holding seven. Ordering is
+  // the query's too, so page two continues page one instead of being
+  // re-sorted against a different set.
+  const visible = items;
   const unscored = visible.filter((o) => o.fit_score === null).length;
 
   return (
@@ -158,7 +198,7 @@ export function OpportunityList({
 
         <button
           className="cw-btn"
-          disabled={busy !== null || visible.length === 0}
+          disabled={busy !== null || total === 0}
           title="Check every posting still resolves and is still open"
           onClick={() =>
             run("verify", async (account) => {
@@ -416,6 +456,28 @@ export function OpportunityList({
           })}
         </div>
       )}
+
+      <Pager
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        noun="posting"
+        busy={busy !== null}
+        onPage={(n) => {
+          void load(n);
+          // A tall card list leaves you halfway down the previous page
+          // otherwise, looking at row six of the new one. The main column
+          // is the scroll container on desktop, not the window -- falling
+          // back to the window covers the narrow layout, where the shell
+          // is not height-constrained and the document scrolls as usual.
+          const main = document.querySelector(".cw-main");
+          if (main && main.scrollHeight > main.clientHeight) {
+            main.scrollTo({ top: 0, behavior: "smooth" });
+          } else {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+        }}
+      />
     </>
   );
 }

@@ -22,7 +22,7 @@
   --sheet: rgba(12, 11, 10, 0.58);
   /* Menus overlay form fields, so they need a near-solid ground --
      the translucent sheet lets the labels underneath read through. */
-  --menu: rgba(16, 15, 14, 0.985);
+  --menu: rgba(22, 20, 18, 0.94);
 
   --orange: #ff7a18;
   --orange-ink: #ffa25c;
@@ -64,7 +64,7 @@
   --rim2: rgba(0, 0, 0, 0.18);
   --hi: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   --sheet: rgba(255, 255, 255, 0.58);
-  --menu: rgba(252, 251, 250, 0.985);
+  --menu: rgba(253, 252, 251, 0.95);
 
   --orange: #c24e00;
   --orange-ink: #a34200;
@@ -444,6 +444,49 @@ textarea::placeholder {
   display: none;
 }
 
+/* On anything wide enough to show the sidebar, the SHELL is the height
+   of the window and the main column is what scrolls -- not the document.
+   It used to be the other way round, with the sidebar stuck to the top of
+   a page that scrolled underneath it, so reading a long list scrolled the
+   navigation off screen and getting back to it meant scrolling all the
+   way up. `position: sticky` could not fix that on its own: .cw-shell
+   sets `overflow: hidden`, which makes it the sticky element's scroll
+   container, and an element cannot stick to a container that does not
+   itself scroll.
+
+   Every one of these needs `min-height: 0`. A flex or grid child's
+   default `min-height: auto` refuses to shrink below its content, so the
+   main column would grow to fit the list and push the whole shell past
+   the bottom of the window instead of scrolling inside it -- the scroll
+   region silently moves back to the document and the sidebar leaves
+   again. */
+@media (min-width: 901px) {
+  .cw-page-app {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .cw-shell {
+    height: 100%;
+    min-height: 0;
+  }
+  .cw-aside {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .cw-column {
+    min-height: 0;
+  }
+  .cw-main {
+    min-height: 0;
+    overflow-y: auto;
+    /* Reaching the end of a list shouldn't start scrolling whatever is
+       behind the shell. */
+    overscroll-behavior: contain;
+  }
+}
+
 @media (max-width: 1180px) {
   .cw-hide-sm {
     display: none;
@@ -561,15 +604,31 @@ textarea::placeholder {
   }
 }
 
-/* ── preloader ───────────────────────────────────────────────────────
-   Five seconds, four beats, and a long rest in the middle.
+/* -- preloader -------------------------------------------------------
+   Five seconds, three beats, and no cut.
 
      0.00s  the mark travels in from the left
      0.65s  the wordmark travels in from the right to meet it
-     1.60s  the finished lockup holds -- two full seconds, because the
-            hold IS the brand moment; everything before it is arrival
-     3.80s  the panel parts and the page arrives behind it
+     1.60s  the finished lockup holds -- a little over two seconds,
+            because the hold IS the brand moment; everything before it
+            is arrival
+     3.85s  the whole panel slides up and off, uncovering the page
      5.00s  done
+
+   It used to tear down the middle. Two halves sliding apart means there
+   is always an edge where they meet, and an edge in the middle of a
+   brand moment reads as damage however carefully it is drawn -- softened
+   it looked like a smudge, sharpened it looked like a cut. So the panel
+   leaves as one piece.
+
+   And it slides rather than fades. A fade spends its whole second
+   half-transparent, which is the one state where both layers are visible
+   at once and neither is readable -- it looks like a rendering fault
+   rather than a transition. A slide is unambiguous at every frame: the
+   panel is either over that pixel or it is not. It also gives the
+   moment a direction, and something moving off the top of the screen
+   reads as the app arriving from underneath rather than as a screen
+   being wiped.
 
    Both halves of the lockup move only in `transform` and `opacity`, and
    the lockup occupies its final layout from the first frame. An earlier
@@ -577,86 +636,47 @@ textarea::placeholder {
    frame and cannot be composited -- that is what read as juddery.
    Nothing here touches layout.
 
-   There is no seam. A visible line across the middle announced the cut
-   before it happened and made the panel look like a screenshot being
-   sliced. Instead the halves are seamless while closed, and a soft
-   shadow fades in along their inner edges only as they part -- so the
-   depth appears at the moment there is genuinely depth to see.
-
-   Easing is expo-out (0.16, 1, 0.3, 1): leaves fast, lands slow. That
-   asymmetry is what reads as physical. */
+   Easing is expo-out (0.16, 1, 0.3, 1) on the way in: leaves fast, lands
+   slow, which is what reads as physical. The exit is a plain ease-out,
+   because something receding does not need a flourish. */
 
 .cw-preloader {
   display: none;
 }
 
 [data-preload="on"] .cw-preloader {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: fixed;
   inset: 0;
   z-index: 100;
   pointer-events: none;
-}
-
-/* The content underneath stays invisible until the halves part. `both`
-   fill means it is already at opacity 0 at parse time, so there is
-   nothing to see before the delay elapses. */
-[data-preload="on"] .cw-reveal-target {
-  animation: cw-reveal 1050ms cubic-bezier(0.16, 1, 0.3, 1) 3950ms both;
-}
-
-.cw-preloader-half {
-  position: absolute;
-  left: 0;
-  right: 0;
-  /* A hair over half, so the two never leave a sub-pixel seam on an odd
-     viewport height -- that gap is the thin dark line that showed up
-     mid-split. They overlap rather than meet. */
-  height: calc(50% + 1px);
-  display: flex;
   overflow: hidden;
   background-color: var(--page);
   will-change: transform;
-  backface-visibility: hidden;
+  /* easeInOutQuart. A curtain that starts and ends at rest but covers
+     the middle fast: it reads as weight, where a linear slide reads as a
+     panel being dragged. */
+  animation: cw-preloader-out 1150ms cubic-bezier(0.76, 0, 0.24, 1) 3850ms forwards;
 }
 
-.cw-preloader-half[data-half="top"] {
-  top: 0;
-  align-items: flex-end;
-  animation: cw-split-up 1200ms cubic-bezier(0.16, 1, 0.3, 1) 3800ms forwards;
-}
+/* The content underneath stays invisible until just before the panel
+   moves, and is fully painted by the time any of it is uncovered. `both`
+   fill means it is already at opacity 0 at parse time, so there is
+   nothing to see before the delay elapses.
 
-.cw-preloader-half[data-half="bottom"] {
-  bottom: 0;
-  align-items: flex-start;
-  animation: cw-split-down 1200ms cubic-bezier(0.16, 1, 0.3, 1) 3800ms forwards;
-}
-
-/* Depth along the parting edges, not a line across a closed surface.
-   Invisible until the split begins, so nothing telegraphs the cut. */
-.cw-preloader-half::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 90px;
-  opacity: 0;
-  pointer-events: none;
-  animation: cw-edge 420ms ease-out 3800ms both;
-}
-.cw-preloader-half[data-half="top"]::after {
-  bottom: 0;
-  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.42));
-}
-.cw-preloader-half[data-half="bottom"]::after {
-  top: 0;
-  background: linear-gradient(to top, transparent, rgba(0, 0, 0, 0.42));
+   It finishes BEFORE the slide starts on purpose. A curtain reveals what
+   is already behind it; content fading in through the gap as the gap
+   opens is two transitions competing, and the eye reads the slower one
+   as lag. */
+[data-preload="on"] .cw-reveal-target {
+  animation: cw-reveal 420ms ease-out 3380ms both;
 }
 
 /* The same warm/cool wash the app itself sits on, carrying the same 80px
    blur -- without it the gradients keep hard edges and the intro reads
-   as a different surface from the app it opens onto. Sized to the whole
-   viewport and offset per half so the two form one continuous field. */
+   as a different surface from the app it opens onto. */
 .cw-preloader-wash {
   position: absolute;
   /* Overdrawn past every edge so the blur has room and never fades to a
@@ -672,13 +692,6 @@ textarea::placeholder {
   pointer-events: none;
 }
 
-.cw-preloader-half[data-half="top"] .cw-preloader-wash {
-  background-position: 0 0, 0 0, 0 0;
-}
-.cw-preloader-half[data-half="bottom"] .cw-preloader-wash {
-  background-position: 0 calc(-50vh - 1px), 0 calc(-50vh - 1px), 0 calc(-50vh - 1px);
-}
-
 .cw-preloader-grain {
   position: absolute;
   inset: 0;
@@ -688,21 +701,11 @@ textarea::placeholder {
   pointer-events: none;
 }
 
-/* Drawn twice, once per half, each clipped to its own side, so the split
-   passes *through* the logo rather than sliding a whole logo out of
-   frame. Final layout from the first frame; only transforms move. */
 .cw-preloader-lockup {
   position: relative;
   display: flex;
   align-items: center;
   gap: 18px;
-  width: 100%;
-  justify-content: center;
-  transform: translateY(calc(50% - 1px));
-}
-
-.cw-preloader-half[data-half="bottom"] .cw-preloader-lockup {
-  transform: translateY(calc(-50% + 1px));
 }
 
 .cw-preloader-mark {
@@ -743,21 +746,32 @@ textarea::placeholder {
   }
 }
 
-@keyframes cw-edge {
+/* Up and away as one piece. 101% rather than 100% so a fractional
+   viewport height cannot leave a one-pixel band of the panel behind --
+   the same rounding that used to show a hairline between the two halves.
+
+   `visibility` is carried along so the element is genuinely gone for a
+   screen reader and for pointer events at the end, not merely parked off
+   screen and still eligible for a click. */
+@keyframes cw-preloader-out {
+  from {
+    transform: translate3d(0, 0, 0);
+    visibility: visible;
+  }
+  99% {
+    visibility: visible;
+  }
+  to {
+    transform: translate3d(0, -101%, 0);
+    visibility: hidden;
+  }
+}
+
+/* Opacity only. Anything that moves here moves behind a closed curtain,
+   where nobody can see it. */
+@keyframes cw-reveal {
   from { opacity: 0; }
   to   { opacity: 1; }
-}
-@keyframes cw-split-up {
-  from { transform: translate3d(0, 0, 0); }
-  to   { transform: translate3d(0, -101%, 0); }
-}
-@keyframes cw-split-down {
-  from { transform: translate3d(0, 0, 0); }
-  to   { transform: translate3d(0, 101%, 0); }
-}
-@keyframes cw-reveal {
-  from { opacity: 0; transform: translate3d(0, 14px, 0); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 /* Reduced motion: the head script never sets the attribute, so none of

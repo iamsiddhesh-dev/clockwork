@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { api } from "@/lib/api";
 import { maybeAccount } from "@/lib/account-server";
 import { OnboardingFlow } from "./onboarding-flow";
@@ -15,6 +16,13 @@ export default async function OnboardingPage() {
   // Pre-fill if they started and came back: onboarding shouldn't punish
   // someone for closing the tab halfway through.
   const profile = account ? await api.getProfile(account).catch(() => null) : null;
+
+  // Someone who has already set up is not a new user and must not be
+  // asked to set up again -- finishing this flow a second time re-runs
+  // the whole kickoff against a workspace that already has leads in it.
+  // Editing an existing profile lives in Settings, which is where the
+  // rest of the workspace's knobs are.
+  if (profile?.name) redirect("/overview");
 
   return <OnboardingFlow initial={profile} />;
 }

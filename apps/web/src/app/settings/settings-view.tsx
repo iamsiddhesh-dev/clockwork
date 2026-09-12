@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { Profile } from "@/lib/api";
+import { api, type AccountRecord, type Profile } from "@/lib/api";
 import { clearAccount, readAccount } from "@/lib/account";
 import { ProfileForm } from "@/app/profile/profile-form";
 import { Card, SectionHead } from "@/components/ui";
@@ -87,14 +87,17 @@ function Toggle({
 
 export function SettingsView({
   profile,
+  account,
   dailyCapUsd,
 }: {
   profile: Profile | null;
+  /** Null when the API could not be reached -- not the same as having no
+   *  account, so the card says so rather than showing blanks. */
+  account: AccountRecord | null;
   dailyCapUsd: number;
 }) {
   const router = useRouter();
   const { ambient, toggleAmbient, theme, toggleTheme } = useShell();
-  const [confirmingReset, setConfirmingReset] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // Built on the client so it carries whatever origin the app is
@@ -215,60 +218,155 @@ export function SettingsView({
         )}
       </Card>
 
-      <Card pad={26} style={{ maxWidth: 760 }}>
-        <SectionHead title="Workspace" />
-        <p
-          style={{
-            margin: "8px 0 0",
-            fontSize: 13.5,
-            lineHeight: 1.6,
-            color: "var(--dim)",
-            maxWidth: "62ch",
-          }}
-        >
-          No sign-in. Anyone with this id can read the workspace — fine for a demo, not for real
-          client data.
-        </p>
-        <p
-          className="cw-mono"
-          style={{
-            margin: "14px 0 0",
-            fontSize: 11.5,
-            color: "var(--quiet)",
-            wordBreak: "break-all",
-          }}
-        >
-          {readAccount() ?? "—"}
-        </p>
+      <AccountCard account={account} />
+    </>
+  );
+}
 
-        <div className="cw-row" style={{ marginTop: 20 }}>
-          {confirmingReset ? (
-            <>
+/**
+ * Who this workspace belongs to, and the two ways out of it.
+ *
+ * Logging out and deleting used to be the same button -- "start a fresh
+ * workspace", which forgot the id and left every row stranded in the
+ * database with no way back. They are opposites and now read as
+ * opposites: one is reversible with an email, the other is reversible by
+ * nobody.
+ */
+function AccountCard({ account }: { account: AccountRecord | null }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function logOut() {
+    clearAccount();
+    router.push("/signin");
+    router.refresh();
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      const id = readAccount();
+      if (id) await api.deleteAccount(id);
+      // Only after the server confirms. Clearing the cookie first and
+      // then failing would leave the workspace alive and unreachable --
+      // the precise failure this whole screen exists to undo.
+      clearAccount();
+      router.push("/onboarding");
+      router.refresh();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card pad={26} style={{ maxWidth: 760 }}>
+      <SectionHead title="Your account" />
+
+      {account ? (
+        <>
+          <p style={{ margin: "8px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--dim)" }}>
+            {account.email ? (
+              <>
+                Signed in as <strong style={{ color: "var(--ink)" }}>{account.email}</strong>. Your
+                work stays here until you delete it.
+              </>
+            ) : (
+              <>
+                This workspace has no email on it yet, so there is no way back to it if this browser
+                forgets the cookie. Add one to your profile above.
+              </>
+            )}
+          </p>
+          <p
+            className="cw-mono"
+            style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)", wordBreak: "break-all" }}
+          >
+            {account.id}
+          </p>
+        </>
+      ) : (
+        <p style={{ margin: "8px 0 0", fontSize: 13.5, color: "var(--warn)" }}>
+          Couldn&rsquo;t read your account — the agent API didn&rsquo;t answer.
+        </p>
+      )}
+
+      <p style={{ margin: "16px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--quiet)" }}>
+        There is no password. Anyone who knows that email, or this id, can open this workspace.
+      </p>
+
+      <div style={{ marginTop: 20, display: "flex", flexDirection: "column" }}>
+        <Row
+          title="Log out"
+          blurb="Forgets this browser only. Sign back in with your email and everything is where you left it."
+        >
+          <button className="cw-btn" onClick={logOut}>
+            Log out
+          </button>
+        </Row>
+
+        <Row
+          title="Delete this account"
+          blurb="Your profile, leads, threads, deals, quotes, invoices and run history. Permanently, with no copy kept."
+        >
+          {confirming ? null : (
+            <button
+              className="cw-btn"
+              style={{ borderColor: "var(--bad)", color: "var(--bad)" }}
+              onClick={() => setConfirming(true)}
+            >
+              Delete
+            </button>
+          )}
+        </Row>
+
+        {confirming && (
+          <div
+            className="cw-card-sm"
+            style={{ padding: 16, borderColor: "var(--bad)", marginBottom: 4 }}
+          >
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: "var(--sub)" }}>
+              This cannot be undone. Type <strong>delete</strong> to confirm.
+            </p>
+            <div className="cw-row" style={{ marginTop: 12, gap: 10 }}>
+              <input
+                className="cw-input"
+                style={{ flex: "0 1 180px" }}
+                value={typed}
+                autoFocus
+                aria-label="Type delete to confirm"
+                onChange={(event) => setTyped(event.target.value)}
+              />
               <button
                 className="cw-btn"
                 style={{ borderColor: "var(--bad)", color: "var(--bad)" }}
+                disabled={typed.trim().toLowerCase() !== "delete" || busy}
+                onClick={remove}
+              >
+                {busy ? "Deleting…" : "Delete everything"}
+              </button>
+              <button
+                className="cw-btn"
+                disabled={busy}
                 onClick={() => {
-                  clearAccount();
-                  router.push("/onboarding");
-                  router.refresh();
+                  setConfirming(false);
+                  setTyped("");
+                  setError(null);
                 }}
               >
-                Yes, start over
-              </button>
-              <button className="cw-btn" onClick={() => setConfirmingReset(false)}>
                 Cancel
               </button>
-              <span style={{ fontSize: 12.5, color: "var(--quiet)", flex: "1 1 100%" }}>
-                Forgets this id. The data stays, but there is no way back to it.
-              </span>
-            </>
-          ) : (
-            <button className="cw-btn" onClick={() => setConfirmingReset(true)}>
-              Start a fresh workspace
-            </button>
-          )}
-        </div>
-      </Card>
-    </>
+            </div>
+            {error && (
+              <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--bad)" }}>{error}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
