@@ -60,7 +60,7 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 
 ### Tests
 
-76 tests, stdlib `unittest`, no install step:
+88 tests, stdlib `unittest`, no install step:
 
 ```bash
 cd apps/agent && PYTHONPATH=src python -m unittest discover -s tests -t .
@@ -124,6 +124,7 @@ apps/agent/db/005_money.sql
 apps/agent/db/006_accounts.sql
 apps/agent/db/007_profile_fields.sql
 apps/agent/db/008_link_verification.sql
+apps/agent/db/009_profile_links.sql
 
 # 2. Backend
 cd apps/agent
@@ -138,7 +139,11 @@ cp .env.example .env.local  # NEXT_PUBLIC_API_URL
 npm install && npm run dev
 ```
 
-Then open `http://localhost:3000`. There is no sign-in: the onboarding form is the front door, and filling it in creates your workspace. The agent goes to work the moment you finish it.
+Then open `http://localhost:3000`. There is no sign-in: the onboarding form is the front door, and filling it in creates your workspace.
+
+Onboarding asks for three things and reads the rest. Who you are, what you charge, and where your work lives — then it fetches your GitHub and your site, extracts your skills and past results, and shows them back for you to edit. It does **not** ask you to type your own case studies into a form, because nobody enjoys that and no client asks for it either.
+
+What it can actually read, stated plainly: **GitHub** through the public API, **a portfolio site** over HTTP, **a CV** as pasted text. **LinkedIn it cannot** — LinkedIn blocks automated fetching, so the link is stored for clients and the UI says it isn't scanned rather than silently returning nothing.
 
 To get a populated workspace without waiting on three job boards and a model provider:
 

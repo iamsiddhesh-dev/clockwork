@@ -49,10 +49,7 @@ export default async function DealsPage() {
       />
 
       {deals.length === 0 ? (
-        <Empty title="No deals yet">
-          A deal is created when an inbound lead is qualified, or when you approve an outbound pitch
-          and it turns into a real conversation.
-        </Empty>
+        <Empty title="No deals yet">One appears when a lead is qualified.</Empty>
       ) : (
         <div className="cw-card" style={{ overflow: "hidden" }}>
           {deals

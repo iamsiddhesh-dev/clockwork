@@ -173,10 +173,7 @@ export function MoneyBoard({
           )}
 
           {quotes.length === 0 ? (
-            <Empty title="No quotes yet">
-              A quote is priced off your rate card once a deal is worth pricing. The model proposes
-              line items; the totals are computed in code.
-            </Empty>
+            <Empty title="No quotes yet">Price a deal above to draft one.</Empty>
           ) : (
             quotes.map((quote) => {
               const deal = dealById.get(quote.deal_id);
@@ -304,10 +301,7 @@ export function MoneyBoard({
       {tab === "invoices" && (
         <div className="cw-stack">
           {invoices.length === 0 ? (
-            <Empty title="No invoices yet">
-              An invoice can only be raised once a human records that the client accepted the quote.
-              The agent has no tool that decides that for you.
-            </Empty>
+            <Empty title="No invoices yet">Mark a quote accepted to raise one.</Empty>
           ) : (
             invoices.map((invoice) => {
               const isOverdue =

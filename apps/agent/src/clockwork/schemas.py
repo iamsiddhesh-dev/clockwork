@@ -100,3 +100,41 @@ class QuoteDraft(BaseModel):
         description="One or two sentences for the freelancer (not the client) on how this "
         "was priced, citing the profile's rates and what the thread actually asked for."
     )
+
+
+class ImportedProfile(BaseModel):
+    """What could be read out of a GitHub account, a portfolio site or a
+    pasted CV. Everything here is a suggestion shown back to the person
+    for confirmation -- nothing is saved without them seeing it.
+
+    `highlights` is a flat list of strings rather than a list of objects
+    on purpose. The extractor runs on the small model, and asked for
+    nested objects it returned bare strings where objects were required
+    and the whole call failed schema validation. A flat list it gets
+    right every time; the title/summary split is done in Python, where it
+    is deterministic and testable. Shape the schema to the model you
+    actually have.
+    """
+
+    title: str | None = Field(
+        default=None,
+        description="A professional title, e.g. 'Backend developer'. Null if the "
+        "material genuinely doesn't say.",
+    )
+    headline: str | None = Field(
+        default=None,
+        description="One line, under 160 characters, on what they do and who for. "
+        "Plain language, no marketing voice.",
+    )
+    skills: list[str] = Field(
+        default_factory=list,
+        description="Concrete technologies and disciplines actually evidenced. "
+        "No soft skills, no 'team player'. At most 12.",
+    )
+    highlights: list[str] = Field(
+        default_factory=list,
+        description="At most 3 past results, strongest first. Each ONE string in the "
+        "form 'Short name — what it was and what it achieved'. Keep any real number "
+        "exactly as written. Only things the material actually shows; an empty list "
+        "is a correct answer.",
+    )

@@ -22,18 +22,8 @@ export default async function MoneyPage() {
         kicker="Money"
         title="Quote, invoice, chase"
         aside={
-          <p
-            style={{
-              margin: 0,
-              flex: "1 1 280px",
-              fontSize: 13,
-              lineHeight: 1.6,
-              color: "var(--dim)",
-              maxWidth: "44ch",
-            }}
-          >
-            The agent writes and schedules all three. You decide what the client actually said
-            &mdash; nothing here can mark itself accepted or paid.
+          <p className="cw-mono" style={{ margin: 0, fontSize: 11, color: "var(--quiet)" }}>
+            you confirm what the client said
           </p>
         }
       />

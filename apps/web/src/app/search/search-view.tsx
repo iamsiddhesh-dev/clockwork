@@ -98,7 +98,7 @@ export function SearchView() {
           />
         </label>
         <p style={{ margin: "12px 0 0", fontSize: 12.5, color: "var(--quiet)" }}>
-          Postings, conversations, messages, deals, invoices and runs — all at once.
+          Postings, conversations, deals, invoices, runs.
         </p>
       </div>
 
@@ -110,8 +110,8 @@ export function SearchView() {
           <div className="cw-label" style={{ color: "var(--bad)" }}>
             The search didn&rsquo;t run
           </div>
-          <p style={{ margin: "12px 0 0", fontSize: 14, lineHeight: 1.6, color: "var(--dim)", maxWidth: "54ch" }}>
-            This is a connection problem, not an empty workspace — nothing has been ruled out.
+          <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--dim)" }}>
+            A connection problem, not an empty workspace.
           </p>
           <p className="cw-mono" style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--quiet)" }}>
             {error}
@@ -121,13 +121,10 @@ export function SearchView() {
           </button>
         </div>
       ) : query.trim().length < 2 ? (
-        <Empty title="Type to search">
-          Two characters is enough. A single one matches half the workspace and tells you nothing.
-        </Empty>
+        <Empty title="Type to search">Two characters is enough.</Empty>
       ) : hits.length === 0 && !busy && result !== null ? (
         <Empty title={`Nothing matches “${query.trim()}”`}>
-          This searched every posting, conversation, message, deal, invoice and run in the
-          workspace — so a blank result here really does mean it is not there.
+          Every record was searched.
         </Empty>
       ) : (
         <div className="cw-card" style={{ overflow: "hidden", opacity: busy ? 0.6 : 1 }}>

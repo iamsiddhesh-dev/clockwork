@@ -151,9 +151,8 @@ export function ApiDown({ what }: { what: string }) {
       <h2 style={{ margin: "14px 0 0", fontSize: 20, fontWeight: 600, letterSpacing: "-0.028em" }}>
         {what} could not be loaded
       </h2>
-      <p style={{ margin: "12px 0 0", fontSize: 14, lineHeight: 1.6, color: "var(--dim)", maxWidth: "54ch" }}>
-        This is a connection problem, not an empty workspace — whatever is in there is still in
-        there. Check the API is running, then reload.
+      <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--dim)" }}>
+        A connection problem, not an empty workspace. Check the API is running.
       </p>
     </div>
   );

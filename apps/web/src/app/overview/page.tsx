@@ -91,9 +91,7 @@ export default async function OverviewPage() {
           Can&rsquo;t reach the agent
         </h1>
         <p style={{ margin: "14px 0 0", fontSize: 14.5, color: "var(--dim)", maxWidth: "52ch" }}>
-          The API at <code className="cw-mono">{process.env.NEXT_PUBLIC_API_URL}</code> didn&rsquo;t
-          answer. Start it with{" "}
-          <code className="cw-mono">uvicorn clockwork.api:app --port 8000</code> and reload.
+          Start it with <code className="cw-mono">uvicorn clockwork.api:app --port 8000</code>.
         </p>
       </Card>
     );
@@ -153,8 +151,8 @@ export default async function OverviewPage() {
               }}
             >
               {active === 0
-                ? "Four workflows are wired and waiting: sourcing, pitching, quoting and collections."
-                : `${active} of ${workflows.length} workflows have produced work across sourcing, pitching, quoting and collections.`}
+                ? "Sourcing, pitching, quoting and collections — all wired, none run yet."
+                : `${active} of ${workflows.length} workflows running: sourcing, pitching, quoting, collections.`}
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 26 }}>
               <Link
@@ -342,8 +340,7 @@ export default async function OverviewPage() {
             <h2 className="cw-h2">Scheduled</h2>
             {scheduled.length === 0 ? (
               <p style={{ margin: "16px 0 0", fontSize: 13, color: "var(--quiet)" }}>
-                Nothing on the calendar. The agent schedules its own check-ins when it sends
-                something.
+                Nothing due. Check-ins get scheduled when something goes out.
               </p>
             ) : (
               <ul style={{ listStyle: "none", margin: "16px 0 0", padding: 0 }}>

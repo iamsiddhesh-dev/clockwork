@@ -184,8 +184,7 @@ export function OpportunityList({
           style={{ padding: 18, borderColor: "var(--orange-bd)", background: "var(--orange-bg)" }}
         >
           <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: "var(--sub)" }}>
-            No profile yet. Fetching leads works, but fit scoring can&rsquo;t run — there is nothing
-            to measure a posting against.{" "}
+            No profile yet, so nothing can be scored.{" "}
             <Link href="/settings" style={{ color: "var(--orange-ink)", fontWeight: 600 }}>
               Fill it in
             </Link>
@@ -196,8 +195,7 @@ export function OpportunityList({
 
       {visible.length === 0 ? (
         <Empty title="Nothing sourced yet">
-          Hit <strong>Fetch leads</strong> to pull live contract postings from Hacker News, Remotive
-          and RemoteOK.
+          Hit <strong>Fetch leads</strong> to pull from three job boards.
         </Empty>
       ) : (
         <div className="cw-stack">

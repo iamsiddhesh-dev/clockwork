@@ -42,10 +42,7 @@ export default async function RunsPage() {
       />
 
       {runs.length === 0 ? (
-        <Empty title="Nothing has run yet">
-          Both an inbound message and the scheduler wake the same entry point. Once either fires,
-          every step it took shows up here.
-        </Empty>
+        <Empty title="Nothing has run yet">Every step of every run lands here.</Empty>
       ) : (
         <div className="cw-card" style={{ overflow: "hidden" }}>
           {runs.map((run, index) => (

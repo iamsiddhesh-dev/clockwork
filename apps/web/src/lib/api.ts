@@ -98,6 +98,26 @@ export type Profile = {
   portfolio: PortfolioItem[];
   payment_terms: string | null;
   timezone?: string | null;
+  /** Where their work actually lives. Read by the importer, except
+   *  LinkedIn, which blocks automated fetching and is stored only. */
+  links?: {
+    website?: string;
+    github?: string;
+    linkedin?: string;
+    resume_text?: string;
+  };
+};
+
+export type ImportedProfileResult = {
+  found: boolean;
+  read: string[];
+  skipped: string[];
+  profile: {
+    title: string | null;
+    headline: string | null;
+    skills: string[];
+    highlights: PortfolioItem[];
+  } | null;
 };
 
 export type Opportunity = {
@@ -429,6 +449,17 @@ export const api = {
     }),
   dismissOpportunity: (account: string, id: string) =>
     apiFetch<Opportunity>(`/opportunities/${id}/dismiss`, account, { method: "POST" }),
+
+  /** Reads a GitHub account, a site and a pasted CV into a suggestion.
+   *  Saves nothing -- the caller shows it back for confirmation. */
+  importProfile: (
+    account: string,
+    body: { github?: string | null; website?: string | null; linkedin?: string | null; resume_text?: string | null },
+  ) =>
+    apiFetch<ImportedProfileResult>(`/profile/import`, account, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   getProfile: (account: string) =>
     apiFetch<Profile | null>(`/profile`, account, { cache: "no-store" }),

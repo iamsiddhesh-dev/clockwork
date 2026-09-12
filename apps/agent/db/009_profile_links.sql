@@ -1,0 +1,31 @@
+-- Clockwork — migration 009: links instead of homework
+--
+-- Onboarding used to ask people to type out their own case studies and
+-- paste a writing sample. Both were the wrong question. Nobody enjoys
+-- writing their own portfolio into a form, and clients do not ask for
+-- one either -- they ask for a site, a GitHub, a CV. So onboarding asks
+-- for those, reads what is readable, and shows back what it found for
+-- confirmation.
+--
+-- Stored as jsonb rather than four columns because this set will grow
+-- (Dribbble, Behance, a package registry) and each addition would
+-- otherwise be a migration for a field nothing queries on.
+--
+-- Shape:
+--   { "website": "...", "github": "...", "linkedin": "...",
+--     "resume_text": "..." }
+--
+-- `resume_text` is pasted text, not a file. PDF parsing needs a binary
+-- dependency and an upload pipeline; pasting works today and the
+-- importer reads it identically.
+--
+-- LinkedIn is stored and deliberately NOT read -- LinkedIn blocks
+-- automated fetching, and shipping a scraper that silently returns
+-- nothing would be worse than saying so. See importer.py.
+
+alter table profile add column if not exists links jsonb not null default '{}'::jsonb;
+
+-- `voice_samples` stays on the table but is no longer collected at
+-- onboarding: asking someone to paste a message they once sent is a
+-- strange first impression, and the writer degrades gracefully without
+-- it. Existing rows keep theirs, and it remains editable in Settings.

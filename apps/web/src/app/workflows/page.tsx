@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { requireAccount } from "@/lib/account-server";
-import { ApiDown, Card, Dot, Empty, PageHead, TONES } from "@/components/ui";
+import { ApiDown, Dot, Empty, PageHead, TONES } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -22,33 +22,19 @@ export default async function WorkflowsPage() {
     <>
       <PageHead
         kicker="Workflows"
-        title="Four stages. Each one drafts, none of them send."
+        title="One agent, four stages"
         aside={
           <p
             className="cw-mono"
             style={{ margin: 0, fontSize: 11, lineHeight: 1.6, color: "var(--quiet)", textAlign: "right" }}
           >
-            one agent · 12 tools
-            <br />
-            {workflows.filter((w) => w.tone !== "idle").length} of {workflows.length} have produced work
+{workflows.filter((w) => w.tone !== "idle").length} of {workflows.length} active · 12 tools
           </p>
         }
       />
 
-      <Card pad={22}>
-        <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.65, color: "var(--dim)", maxWidth: "74ch" }}>
-          These are not four separate agents. Clockwork is a single Strands agent with twelve typed
-          tools, and these are the four stages work moves through — named for the tools that run in
-          each. Each stage is measured by what it actually produced, so one that says it has not run
-          genuinely has not.
-        </p>
-      </Card>
-
       {workflows.length === 0 ? (
-        <Empty title="Nothing to show">
-          The agent has not run yet. Sourcing work from the Opportunities screen is the usual first
-          step.
-        </Empty>
+<Empty title="Nothing has run yet">Start from Opportunities.</Empty>
       ) : (
         <div className="cw-stack">
           {workflows.map((flow) => (

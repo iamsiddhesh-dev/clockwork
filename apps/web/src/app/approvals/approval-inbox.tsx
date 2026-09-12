@@ -160,9 +160,8 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
 
   if (approvals.length === 0) {
     return (
-      <Empty title="Nothing needs your attention">
-        The agent is monitoring the operation. The next thing it wants to send a client will surface
-        here, with what it will do, why, what it read, and what changes.
+      <Empty title="Nothing waiting on you">
+        Anything the agent wants to send a client appears here first.
       </Empty>
     );
   }
@@ -344,7 +343,7 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
                       {approval.citations?.length ?? 0}
                     </div>
                     <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--quiet)" }}>
-                      sources read before drafting
+                      sources read
                     </div>
                   </div>
 
@@ -372,7 +371,7 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
                   <div>
                     <div className="cw-label">Sent?</div>
                     <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.55, color: "var(--dim)" }}>
-                      Not yet. This tool has no code path that sends — only approving runs one.
+                      Not yet. Nothing sends until you approve.
                     </div>
                   </div>
                 </div>

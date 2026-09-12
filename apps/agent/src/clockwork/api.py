@@ -71,6 +71,7 @@ from .auth import account_from_query, create_account, get_current_user_id, resol
 from .context import run_context
 from .db import get_client
 from .executor import execute_approval
+from .importer import import_profile
 from .overview import overview as build_overview, summary as build_summary
 from .scheduler import tick, tick_all_due
 from .search import search as run_search
@@ -311,6 +312,31 @@ class ProfileBody(BaseModel):
     portfolio: list[dict[str, Any]] = []
     payment_terms: str | None = None
     timezone: str | None = None
+    links: dict[str, Any] = {}
+
+
+class ImportRequest(BaseModel):
+    github: str | None = None
+    website: str | None = None
+    linkedin: str | None = None
+    resume_text: str | None = None
+
+
+@app.post("/profile/import")
+def post_profile_import(
+    req: ImportRequest, user_id: str = Depends(get_current_user_id)
+) -> dict:
+    """Read a GitHub account, a portfolio site and a pasted CV into a
+    profile suggestion. Saves nothing -- the caller shows the result back
+    for confirmation first. See importer.py for what is and is not
+    actually fetchable."""
+    with run_context(user_id=user_id, run_id=None):
+        return import_profile(
+            github=req.github,
+            website=req.website,
+            linkedin=req.linkedin,
+            resume_text=req.resume_text,
+        )
 
 
 @app.get("/profile")

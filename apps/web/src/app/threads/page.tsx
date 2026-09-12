@@ -15,7 +15,7 @@ export default async function ThreadsPage() {
     <>
       <PageHead
         kicker="Threads"
-        title="Every conversation it is tracking"
+        title="Conversations"
         aside={
           <p className="cw-mono" style={{ margin: 0, fontSize: 11, color: "var(--quiet)" }}>
             {threads.length} thread{threads.length === 1 ? "" : "s"}
@@ -25,8 +25,7 @@ export default async function ThreadsPage() {
 
       {threads.length === 0 ? (
         <Empty title="No conversations yet">
-          A thread appears when a lead arrives through the intake form, or when you approve an
-          outbound pitch and it becomes a real client relationship.
+          One starts when a lead arrives or a pitch goes out.
         </Empty>
       ) : (
         <div className="cw-card" style={{ overflow: "hidden" }}>

@@ -111,17 +111,8 @@ export function SettingsView({
     <>
       <Card pad={26} style={{ maxWidth: 760 }}>
         <SectionHead title="Profile" />
-        <p
-          style={{
-            margin: "8px 0 22px",
-            fontSize: 13.5,
-            lineHeight: 1.6,
-            color: "var(--dim)",
-            maxWidth: "62ch",
-          }}
-        >
-          Everything the agent grounds itself in. Change the rate and the next quote is priced
-          differently; change the portfolio and the next pitch cites something else.
+        <p style={{ margin: "8px 0 22px", fontSize: 13.5, color: "var(--dim)" }}>
+          What every score, pitch and quote is built from.
         </p>
         <ProfileForm initial={profile} submitLabel="Save changes" />
       </Card>
@@ -131,14 +122,14 @@ export function SettingsView({
         <div style={{ marginTop: 18, display: "flex", flexDirection: "column" }}>
           <Row
             title="Approve before sending"
-            blurb="Every client-facing action waits for you. This is enforced in code, not by settings — an approval-gated tool has no path that sends — so there is nothing here to switch off."
+            blurb="Enforced in code, not settings. There is nothing here to switch off."
           >
             <Toggle on locked label="Approve before sending (enforced in code)" />
           </Row>
 
           <Row
             title="Daily spend cap"
-            blurb="When the day's model spend crosses this, the orchestrator degrades to the smaller model rather than silently skipping work."
+            blurb="Past this, it drops to the cheaper model rather than stopping."
           >
             <span className="cw-mono" style={{ fontSize: 14, fontWeight: 500 }}>
               ${dailyCapUsd.toFixed(2)}
@@ -147,7 +138,7 @@ export function SettingsView({
 
           <Row
             title="Wake schedule"
-            blurb="How often the scheduler drains due tasks and fires the agent with no human present."
+            blurb="How often it wakes up on its own."
           >
             <span className="cw-mono" style={{ fontSize: 14, fontWeight: 500 }}>
               every 30s
@@ -156,12 +147,12 @@ export function SettingsView({
 
           <Row
             title="Ambient lighting"
-            blurb="The colour fields drifting behind the interface. Turn it off for a flatter, quieter surface."
+            blurb="The colour drifting behind the interface."
           >
             <Toggle on={ambient} onClick={toggleAmbient} label="Ambient lighting" />
           </Row>
 
-          <Row title="Theme" blurb="Dark is the design's native state. Light is a full repaint, not a filter.">
+          <Row title="Theme" blurb="Dark or light.">
             <Toggle on={theme === "light"} onClick={toggleTheme} label="Light theme" />
           </Row>
         </div>
@@ -178,10 +169,7 @@ export function SettingsView({
             maxWidth: "62ch",
           }}
         >
-          Put this anywhere a client might find you. A message posted here wakes the agent
-          immediately — it qualifies the lead, opens a thread, and drafts a reply for your approval
-          before the sender has closed the tab. This is the second of the two triggers; the other is
-          the clock.
+          Anyone who posts here wakes the agent: it qualifies the lead and drafts a reply.
         </p>
         <div className="cw-row" style={{ marginTop: 16, gap: 10 }}>
           <code
@@ -222,8 +210,7 @@ export function SettingsView({
         </div>
         {!profile?.name && (
           <p style={{ margin: "12px 0 0", fontSize: 12.5, color: "var(--warn)" }}>
-            The link won&rsquo;t work until your profile has a name — there would be nobody for it to
-            say it reaches.
+            Needs a name on your profile first.
           </p>
         )}
       </Card>
@@ -239,9 +226,8 @@ export function SettingsView({
             maxWidth: "62ch",
           }}
         >
-          There is no sign-in. This workspace is identified by an id held in a cookie in this
-          browser, and anyone holding that id can read it. Fine for a demo you filled in a minute
-          ago — not something to put real client correspondence behind.
+          No sign-in. Anyone with this id can read the workspace — fine for a demo, not for real
+          client data.
         </p>
         <p
           className="cw-mono"
@@ -273,8 +259,7 @@ export function SettingsView({
                 Cancel
               </button>
               <span style={{ fontSize: 12.5, color: "var(--quiet)", flex: "1 1 100%" }}>
-                This forgets the id in this browser and sends you back to onboarding. The data
-                itself stays in the database, but with the id gone there is no way back to it.
+                Forgets this id. The data stays, but there is no way back to it.
               </span>
             </>
           ) : (
