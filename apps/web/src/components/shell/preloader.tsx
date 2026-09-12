@@ -10,12 +10,12 @@ import { Logo } from "./icons";
  * backgrounded tab, a cancelled animation -- cannot leave a full-screen
  * panel sitting over the app forever.
  */
-const FALLBACK_MS = 8000;
+const FALLBACK_MS = 9000;
 
 /**
- * The first thing anyone sees: the mark scales in, holds, slides left as
- * the wordmark writes in beside it, the finished lockup rests, and then
- * the panel splits along a lit seam and the halves leave.
+ * The first thing anyone sees: the mark travels in from the left, the
+ * wordmark travels in from the right to meet it, the finished lockup
+ * holds for two seconds, and then the panel parts and the page arrives.
  *
  * **The markup is always rendered.** Whether it is visible is decided by
  * `data-preload` on <html>, set by the inline head script before the
@@ -74,13 +74,11 @@ export function Preloader() {
         <span className="cw-preloader-wash" />
         <span className="cw-preloader-grain" />
         <Lockup />
-        <span className="cw-preloader-seam" />
       </div>
       <div className="cw-preloader-half" data-half="bottom">
         <span className="cw-preloader-wash" />
         <span className="cw-preloader-grain" />
         <Lockup />
-        <span className="cw-preloader-seam" />
       </div>
     </div>
   );

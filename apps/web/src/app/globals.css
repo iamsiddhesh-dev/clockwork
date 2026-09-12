@@ -562,27 +562,29 @@ textarea::placeholder {
 }
 
 /* ── preloader ───────────────────────────────────────────────────────
-   A brand moment with four distinct beats, and a rest between each. The
-   first version ran all of them inside 1.8s with no gaps, so it read as
-   one hurried lurch rather than a sequence -- you could not see the mark
-   arrive, the word write in, or the panel decide to open.
+   Five seconds, four beats, and a long rest in the middle.
 
-     0.00s  the mark scales in
-     0.72s  ...and is allowed to sit there
-     0.90s  it slides left as the wordmark writes in beside it
-     1.62s  the finished lockup holds, which is the whole point of it
-     2.16s  the seam lights along the cut
-     2.42s  the panel opens and the page arrives behind it
-     3.22s  done
+     0.00s  the mark travels in from the left
+     0.65s  the wordmark travels in from the right to meet it
+     1.60s  the finished lockup holds -- two full seconds, because the
+            hold IS the brand moment; everything before it is arrival
+     3.80s  the panel parts and the page arrives behind it
+     5.00s  done
 
-   Visibility is driven entirely by `data-preload`, which the inline head
-   script sets before first paint. Switching the panel on from a React
-   effect meant the page underneath painted first and the form flashed
-   for a frame; an attribute set in <head> has no such gap.
+   Both halves of the lockup move only in `transform` and `opacity`, and
+   the lockup occupies its final layout from the first frame. An earlier
+   version grew the word's `max-width` from zero, which reflows on every
+   frame and cannot be composited -- that is what read as juddery.
+   Nothing here touches layout.
 
-   Easing is expo-out (0.16, 1, 0.3, 1) on every movement. It leaves fast
-   and lands slowly, which is what reads as "smooth" -- the earlier
-   cubic-bezier(0.76, 0, 0.24, 1) is symmetrical and arrives abruptly. */
+   There is no seam. A visible line across the middle announced the cut
+   before it happened and made the panel look like a screenshot being
+   sliced. Instead the halves are seamless while closed, and a soft
+   shadow fades in along their inner edges only as they part -- so the
+   depth appears at the moment there is genuinely depth to see.
+
+   Easing is expo-out (0.16, 1, 0.3, 1): leaves fast, lands slow. That
+   asymmetry is what reads as physical. */
 
 .cw-preloader {
   display: none;
@@ -600,7 +602,7 @@ textarea::placeholder {
    fill means it is already at opacity 0 at parse time, so there is
    nothing to see before the delay elapses. */
 [data-preload="on"] .cw-reveal-target {
-  animation: cw-reveal 820ms cubic-bezier(0.16, 1, 0.3, 1) 2420ms both;
+  animation: cw-reveal 1050ms cubic-bezier(0.16, 1, 0.3, 1) 3950ms both;
 }
 
 .cw-preloader-half {
@@ -609,7 +611,7 @@ textarea::placeholder {
   right: 0;
   /* A hair over half, so the two never leave a sub-pixel seam on an odd
      viewport height -- that gap is the thin dark line that showed up
-     mid-split. They overlap instead of meeting. */
+     mid-split. They overlap rather than meet. */
   height: calc(50% + 1px);
   display: flex;
   overflow: hidden;
@@ -621,13 +623,34 @@ textarea::placeholder {
 .cw-preloader-half[data-half="top"] {
   top: 0;
   align-items: flex-end;
-  animation: cw-split-up 800ms cubic-bezier(0.16, 1, 0.3, 1) 2420ms forwards;
+  animation: cw-split-up 1200ms cubic-bezier(0.16, 1, 0.3, 1) 3800ms forwards;
 }
 
 .cw-preloader-half[data-half="bottom"] {
   bottom: 0;
   align-items: flex-start;
-  animation: cw-split-down 800ms cubic-bezier(0.16, 1, 0.3, 1) 2420ms forwards;
+  animation: cw-split-down 1200ms cubic-bezier(0.16, 1, 0.3, 1) 3800ms forwards;
+}
+
+/* Depth along the parting edges, not a line across a closed surface.
+   Invisible until the split begins, so nothing telegraphs the cut. */
+.cw-preloader-half::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 90px;
+  opacity: 0;
+  pointer-events: none;
+  animation: cw-edge 420ms ease-out 3800ms both;
+}
+.cw-preloader-half[data-half="top"]::after {
+  bottom: 0;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.42));
+}
+.cw-preloader-half[data-half="bottom"]::after {
+  top: 0;
+  background: linear-gradient(to top, transparent, rgba(0, 0, 0, 0.42));
 }
 
 /* The same warm/cool wash the app itself sits on, carrying the same 80px
@@ -665,13 +688,14 @@ textarea::placeholder {
   pointer-events: none;
 }
 
-/* Drawn twice, once per half, each clipped to its own side, so the seam
-   cuts *through* the logo rather than sliding a whole logo out of frame. */
+/* Drawn twice, once per half, each clipped to its own side, so the split
+   passes *through* the logo rather than sliding a whole logo out of
+   frame. Final layout from the first frame; only transforms move. */
 .cw-preloader-lockup {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   width: 100%;
   justify-content: center;
   transform: translateY(calc(50% - 1px));
@@ -683,59 +707,45 @@ textarea::placeholder {
 
 .cw-preloader-mark {
   flex: none;
-  animation: cw-mark-in 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: cw-mark-in 950ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* The word grows from nothing, and the flex centring pushes the mark
-   left as it does -- so one animation produces both movements and they
-   cannot fall out of step.
-
-   `max-width` is in `em`, sized just past the real width of the word at
-   any font size. The earlier version animated to a fixed 420px, which
-   the text reached less than two-thirds of the way through; the rest of
-   the animation had nothing left to do, and that dead tail is what read
-   as a jerk. */
 .cw-preloader-word {
-  font-size: clamp(30px, 6.2vw, 50px);
+  font-size: clamp(30px, 6.2vw, 52px);
   font-weight: 600;
   letter-spacing: -0.04em;
   white-space: nowrap;
-  overflow: hidden;
-  animation: cw-word-in 720ms cubic-bezier(0.16, 1, 0.3, 1) 900ms both;
+  animation: cw-word-in 950ms cubic-bezier(0.16, 1, 0.3, 1) 650ms both;
 }
 
-/* A hairline of brand orange along the cut, so the split reads as a seam
-   opening rather than the screen breaking. */
-.cw-preloader-seam {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--orange) 30%,
-    var(--orange) 70%,
-    transparent
-  );
-  opacity: 0;
-  animation: cw-seam 420ms cubic-bezier(0.16, 1, 0.3, 1) 2160ms both;
-}
-.cw-preloader-half[data-half="top"] .cw-preloader-seam { bottom: 0; }
-.cw-preloader-half[data-half="bottom"] .cw-preloader-seam { top: 0; }
-
+/* In from the left, with a touch of scale so it arrives rather than
+   simply appearing at a new coordinate. */
 @keyframes cw-mark-in {
-  from { opacity: 0; transform: scale3d(0.72, 0.72, 1) rotate(-18deg); }
-  to   { opacity: 1; transform: scale3d(1, 1, 1) rotate(0deg); }
+  from {
+    opacity: 0;
+    transform: translate3d(-90px, 0, 0) scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
+
+/* In from the right, to meet it. */
 @keyframes cw-word-in {
-  from { opacity: 0; max-width: 0; }
-  60%  { opacity: 1; }
-  to   { opacity: 1; max-width: 6.4em; }
+  from {
+    opacity: 0;
+    transform: translate3d(80px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
 }
-@keyframes cw-seam {
-  from { opacity: 0; transform: scaleX(0.2); }
-  to   { opacity: 1; transform: scaleX(1); }
+
+@keyframes cw-edge {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes cw-split-up {
   from { transform: translate3d(0, 0, 0); }
@@ -746,7 +756,7 @@ textarea::placeholder {
   to   { transform: translate3d(0, 101%, 0); }
 }
 @keyframes cw-reveal {
-  from { opacity: 0; transform: translate3d(0, 12px, 0); }
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
