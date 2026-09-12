@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type PortfolioItem, type Profile } from "@/lib/api";
 import { ensureAccount } from "@/lib/account";
 import { Combobox, Field, NumberField, TagInput, TextField, useFieldId } from "@/components/fields";
@@ -513,8 +513,12 @@ export function ProfileForm({
   const [form, setForm] = useState<ProfileDraft>(() => ({
     ...EMPTY_PROFILE,
     ...(initial ?? {}),
-    timezone: initial?.timezone ?? guessTimeZone(),
   }));
+
+  // After mount, not during render -- see the note in onboarding-flow.
+  useEffect(() => {
+    setForm((f) => (f.timezone ? f : { ...f, timezone: guessTimeZone() }));
+  }, []);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 

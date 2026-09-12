@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type KickoffResult, type Profile } from "@/lib/api";
 import { ensureAccount } from "@/lib/account";
@@ -47,8 +47,16 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
   const [form, setForm] = useState<ProfileDraft>(() => ({
     ...EMPTY_PROFILE,
     ...(initial ?? {}),
-    timezone: initial?.timezone ?? guessTimeZone(),
   }));
+
+  // Filled in after mount, never during render. `guessTimeZone` reads
+  // the *browser's* zone, and on the server it reads the server's -- so
+  // doing this in the initial state made React hydrate an input holding
+  // "UTC" over markup holding "Asia/Calcutta", which is exactly the
+  // hydration mismatch warning.
+  useEffect(() => {
+    setForm((f) => (f.timezone ? f : { ...f, timezone: guessTimeZone() }));
+  }, []);
   const [touched, setTouched] = useState(false);
   const [result, setResult] = useState<KickoffResult | null>(null);
   const [error, setError] = useState<string | null>(null);

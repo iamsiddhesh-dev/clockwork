@@ -3,39 +3,68 @@
 import { useEffect } from "react";
 import { Logo } from "./icons";
 
-/** Matches the CSS: 1180ms of delay plus a 620ms split. */
-const TOTAL_MS = 1800;
+/**
+ * Only a safety net. The panel normally comes down when the split
+ * animation actually ends, so the CSS owns the timing on its own. This
+ * exists purely so a browser that never fires `animationend` -- a
+ * backgrounded tab, a cancelled animation -- cannot leave a full-screen
+ * panel sitting over the app forever.
+ */
+const FALLBACK_MS = 8000;
 
 /**
- * The first thing anyone sees: the mark draws itself, slides left, the
- * wordmark writes in beside it, then the panel splits and the halves
- * leave in opposite directions, carrying the same warm/cool wash the app
- * itself sits on.
+ * The first thing anyone sees: the mark scales in, holds, slides left as
+ * the wordmark writes in beside it, the finished lockup rests, and then
+ * the panel splits along a lit seam and the halves leave.
  *
  * **The markup is always rendered.** Whether it is visible is decided by
- * `data-preload` on <html>, which the inline head script sets before the
- * browser paints (see NO_FLASH_SCRIPT). The previous version switched
+ * `data-preload` on <html>, set by the inline head script before the
+ * browser paints (see NO_FLASH_SCRIPT). An earlier version switched
  * itself on from a React effect, which runs after the first paint -- so
- * the onboarding form was visible for a frame before the panel dropped
- * over it. An intro you can see the app behind is worse than none.
+ * the form was visible for a frame before the panel dropped over it.
  *
- * React's only job here is to take the attribute away once the animation
- * has finished, so the panel stops covering a page nobody can click.
+ * **The CSS owns the timing.** This waits for the split animation to end
+ * rather than counting the same milliseconds a second time in
+ * JavaScript. Two hardcoded timings in two files is a bug waiting to
+ * happen, and it duly happened: retiming the animation left a
+ * `setTimeout` behind that tore the panel away while it was still
+ * opening.
  */
 export function Preloader() {
   useEffect(() => {
     const root = document.documentElement;
     if (root.dataset.preload !== "on") return;
 
-    const timer = window.setTimeout(() => {
+    const finish = () => {
       delete root.dataset.preload;
-    }, TOTAL_MS);
+    };
+
+    // `animationend` BUBBLES, so a listener on the half also hears the
+    // mark and the wordmark finishing inside it -- and a plain
+    // `{ once: true }` handler fired on the first of those, tearing the
+    // panel away a beat after the logo appeared. Match the split by name.
+    const onEnd = (event: AnimationEvent) => {
+      if (event.animationName === "cw-split-down") finish();
+    };
+
+    // The bottom half is the last thing still moving, so its split
+    // ending is the moment the intro is genuinely over.
+    const half = document.querySelector<HTMLElement>(
+      '.cw-preloader-half[data-half="bottom"]',
+    );
+    half?.addEventListener("animationend", onEnd);
+    const fallback = window.setTimeout(finish, FALLBACK_MS);
 
     return () => {
-      window.clearTimeout(timer);
-      // If this unmounts mid-animation the panel must not be left
-      // covering the app.
-      delete root.dataset.preload;
+      half?.removeEventListener("animationend", onEnd);
+      window.clearTimeout(fallback);
+      // Deliberately NOT clearing the attribute here. React StrictMode
+      // runs effects mount → cleanup → mount in development, so doing
+      // so wiped `data-preload` milliseconds after the first mount and
+      // the intro never played at all. Nothing needs it anyway: the
+      // panel is this component's own markup, so unmounting removes it
+      // from the page, and the fallback above guarantees the attribute
+      // goes even if the animation never reports finishing.
     };
   }, []);
 
