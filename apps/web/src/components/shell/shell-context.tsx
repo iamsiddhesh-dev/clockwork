@@ -124,6 +124,22 @@ export function useShell(): ShellValue {
  * Runs before first paint so the page never flashes the wrong theme.
  * Inlined as a string because it has to execute ahead of React.
  */
+export const PRELOAD_KEY = "cw-preloaded";
+
+/**
+ * Runs in <head>, before the browser paints anything.
+ *
+ * Theme and ambient were always decided here. The preloader now is too,
+ * and for a sharper reason: it used to be switched on by a React effect,
+ * which runs *after* the first paint -- so the onboarding form flashed
+ * on screen for a frame before the panel dropped over it. An intro you
+ * see the app behind is worse than no intro at all.
+ *
+ * Setting `data-preload` here means CSS can hide the content and show
+ * the panel from the very first frame, with no JavaScript timing
+ * involved. React only takes the attribute away when the animation is
+ * done.
+ */
 export const NO_FLASH_SCRIPT = `
 try {
   var t = localStorage.getItem('${THEME_KEY}');
@@ -133,5 +149,17 @@ try {
 } catch (e) {
   document.documentElement.dataset.theme = 'dark';
   document.documentElement.dataset.ambient = 'on';
+}
+try {
+  var reduced = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var seen = sessionStorage.getItem('${PRELOAD_KEY}') === '1';
+  if (!reduced && !seen) {
+    document.documentElement.dataset.preload = 'on';
+    sessionStorage.setItem('${PRELOAD_KEY}', '1');
+  }
+} catch (e) {
+  // Storage throws outright in private windows. Skipping the intro is
+  // the safe failure here -- a panel that never lifts would hide the app.
 }
 `.trim();

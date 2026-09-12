@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type KickoffResult, type Profile } from "@/lib/api";
 import { ensureAccount } from "@/lib/account";
 import { Logo } from "@/components/shell/icons";
-import { Preloader, usePreloadReveal } from "@/components/shell/preloader";
+import { Preloader } from "@/components/shell/preloader";
 import {
   EMPTY_PROFILE,
   ProfileFields,
@@ -41,7 +41,6 @@ const HEADINGS: Record<StepKey, { title: string; note?: string }> = {
 
 export function OnboardingFlow({ initial }: { initial: Profile | null }) {
   const router = useRouter();
-  const reveal = usePreloadReveal();
 
   const [stage, setStage] = useState<Stage>("form");
   const [stepIndex, setStepIndex] = useState(0);
@@ -87,7 +86,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
 
   if (stage === "form") {
     return (
-      <Frame reveal={reveal}>
+      <Frame intro>
         <Progress index={stepIndex} />
 
         <div className="cw-label" style={{ marginTop: 22 }}>
@@ -131,7 +130,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
 
   if (stage === "working") {
     return (
-      <Frame reveal={false}>
+      <Frame>
         <div className="cw-label">Working</div>
         <h1 className="cw-h1" style={{ marginTop: 10 }}>
           Reading the boards.
@@ -165,7 +164,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
 
   if (stage === "error") {
     return (
-      <Frame reveal={false}>
+      <Frame>
         <div className="cw-label">{profileSaved ? "Partly done" : "Didn’t save"}</div>
         <h1 className="cw-h1" style={{ marginTop: 10 }}>
           {profileSaved ? "Profile saved." : "That didn’t go through."}
@@ -199,7 +198,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
     .join(" · ");
 
   return (
-    <Frame reveal={false}>
+    <Frame>
       <div className="cw-label">Done</div>
       <h1 className="cw-h1" style={{ marginTop: 10 }}>
         Here&rsquo;s what it did.
@@ -290,12 +289,15 @@ function Outcome({ title, note, highlight }: { title: string; note?: string; hig
  * sidebar. This is the only screen where nobody knows what the product
  * is called yet, which is exactly where a wordmark earns its space.
  */
-function Frame({ children, reveal }: { children: React.ReactNode; reveal: boolean }) {
+function Frame({ children, intro }: { children: React.ReactNode; intro?: boolean }) {
   return (
     <>
-      <Preloader />
+      {intro && <Preloader />}
       <div
-        className={reveal ? "cw-reveal" : undefined}
+        // Hidden by CSS until the panel splits -- see globals.css. Only
+        // the first screen needs it; the rest are reached by clicking,
+        // long after the intro is gone.
+        className={intro ? "cw-reveal-target" : undefined}
         style={{ width: "100%", maxWidth: 640, margin: "0 auto", padding: "48px 0" }}
       >
         <div className="cw-row" style={{ gap: 14, marginBottom: 34, justifyContent: "center" }}>

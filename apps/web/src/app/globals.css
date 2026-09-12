@@ -563,19 +563,36 @@ textarea::placeholder {
 
 /* ── preloader ───────────────────────────────────────────────────────
    Four beats: the mark draws itself, slides left to make room, the
-   wordmark writes in beside it, then the whole panel splits and the
-   halves leave in opposite directions.
+   wordmark writes in beside it, then the panel splits and the halves
+   leave in opposite directions.
 
-   Every duration is short on purpose. A preloader is a cost the user
-   pays before they can do anything, so it earns roughly a second and a
-   half and no more -- and it is skipped entirely on a repeat visit and
-   for anyone who has asked for reduced motion. */
+   Visibility is driven entirely by `data-preload`, which the inline head
+   script sets before first paint. That is the whole point: switching the
+   panel on from a React effect meant the page underneath painted first
+   and the form flashed for a frame. CSS driven by an attribute set in
+   <head> has no such gap.
+
+   Every duration is short on purpose. A preloader is a cost paid before
+   anyone can do anything, so it earns about a second and a half and no
+   more -- and it is skipped on a repeat visit and under reduced motion. */
 
 .cw-preloader {
+  display: none;
+}
+
+[data-preload="on"] .cw-preloader {
+  display: block;
   position: fixed;
   inset: 0;
   z-index: 100;
   pointer-events: none;
+}
+
+/* The content underneath stays invisible until the halves part. `both`
+   fill means it is already at opacity 0 at parse time, so there is
+   nothing to see before the animation's delay elapses. */
+[data-preload="on"] .cw-reveal-target {
+  animation: cw-reveal 620ms cubic-bezier(0.22, 1, 0.36, 1) 1180ms both;
 }
 
 .cw-preloader-half {
@@ -583,10 +600,31 @@ textarea::placeholder {
   left: 0;
   right: 0;
   height: 50%;
-  background: var(--page);
   display: flex;
   overflow: hidden;
   will-change: transform;
+
+  background-color: var(--page);
+}
+
+/* The same warm/cool wash the app itself sits on, carrying the same
+   80px blur -- without it the gradients keep hard edges and the intro
+   reads as a different surface from the app it opens onto.
+   Sized to the whole viewport and offset per half, so the two pieces
+   form one continuous field rather than two bars with a seam. */
+.cw-preloader-wash {
+  position: absolute;
+  /* Overdrawn past each edge so the blur has room and never fades to a
+     visible line at the boundary. */
+  inset: -20vh -20vw;
+  filter: blur(80px);
+  background-repeat: no-repeat;
+  background-size: 140vw 140vh, 140vw 140vh, 140vw 140vh;
+  background-image:
+    radial-gradient(42% 46% at 22% 40%, var(--l-warm), transparent 72%),
+    radial-gradient(42% 46% at 80% 58%, var(--l-cool), transparent 72%),
+    radial-gradient(32% 42% at 52% 16%, var(--l-white), transparent 70%);
+  pointer-events: none;
 }
 
 .cw-preloader-half[data-half="top"] {
@@ -601,16 +639,34 @@ textarea::placeholder {
   animation: cw-split-down 620ms cubic-bezier(0.76, 0, 0.24, 1) 1180ms forwards;
 }
 
+/* Same grain as the app, so the two surfaces match exactly. */
+.cw-preloader-grain {
+  position: absolute;
+  inset: 0;
+  opacity: var(--grain);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
 /* The lockup is drawn twice, once in each half, clipped so the two
    pieces line up into one. That is what lets the split cut *through* the
    logo rather than sliding a whole logo out of the way. */
 .cw-preloader-lockup {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   width: 100%;
   justify-content: center;
   transform: translateY(50%);
+}
+
+.cw-preloader-half[data-half="top"] .cw-preloader-wash {
+  background-position: 0 0, 0 0, 0 0;
+}
+.cw-preloader-half[data-half="bottom"] .cw-preloader-wash {
+  background-position: 0 -50vh, 0 -50vh, 0 -50vh;
 }
 
 .cw-preloader-half[data-half="bottom"] .cw-preloader-lockup {
@@ -633,14 +689,22 @@ textarea::placeholder {
   animation: cw-word-in 460ms cubic-bezier(0.76, 0, 0.24, 1) 560ms both;
 }
 
+/* A hairline of the brand orange along the cut, so the split reads as a
+   deliberate seam opening rather than the screen simply breaking. */
 .cw-preloader-seam {
   position: absolute;
   left: 0;
   right: 0;
   height: 1px;
-  background: var(--rim2);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--orange) 35%,
+    var(--orange) 65%,
+    transparent
+  );
   opacity: 0;
-  animation: cw-seam 300ms ease 980ms both;
+  animation: cw-seam 320ms ease 940ms both;
 }
 .cw-preloader-half[data-half="top"] .cw-preloader-seam { bottom: 0; }
 .cw-preloader-half[data-half="bottom"] .cw-preloader-seam { top: 0; }
@@ -658,8 +722,8 @@ textarea::placeholder {
   to   { opacity: 1; max-width: 420px; transform: none; }
 }
 @keyframes cw-seam {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from { opacity: 0; transform: scaleX(0.3); }
+  to   { opacity: 1; transform: none; }
 }
 @keyframes cw-split-up {
   to { transform: translateY(-101%); }
@@ -667,20 +731,15 @@ textarea::placeholder {
 @keyframes cw-split-down {
   to { transform: translateY(101%); }
 }
-
-/* The page underneath, arriving as the halves leave. */
-.cw-reveal {
-  animation: cw-reveal 620ms cubic-bezier(0.22, 1, 0.36, 1) 1180ms both;
-}
 @keyframes cw-reveal {
   from { opacity: 0; transform: scale(0.985); }
   to   { opacity: 1; transform: none; }
 }
 
-/* Reduced motion: no split, no slide, nothing to sit through. The
-   global rule already collapses durations; this makes sure the page is
-   not left invisible behind a panel that never animates away. */
+/* Reduced motion: the head script never sets the attribute, so the panel
+   never shows and the content is never hidden. This is belt and braces
+   in case the attribute is set some other way. */
 @media (prefers-reduced-motion: reduce) {
-  .cw-preloader { display: none; }
-  .cw-reveal { animation: none; }
+  [data-preload="on"] .cw-preloader { display: none; }
+  [data-preload="on"] .cw-reveal-target { animation: none; }
 }
