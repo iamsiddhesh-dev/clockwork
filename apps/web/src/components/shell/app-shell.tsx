@@ -7,10 +7,11 @@ import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
 /** Routes that get the lighting and the page ground but none of the app
- *  chrome: there is nothing to navigate to before you are signed in, and
- *  onboarding is deliberately a one-way corridor that ends in its own
- *  explicit buttons. */
-const BARE = ["/login", "/auth/", "/onboarding"];
+ *  chrome. Onboarding is deliberately a one-way corridor that ends in its
+ *  own explicit buttons, and /intake is a public page shown to someone
+ *  else's client -- putting a sidebar full of the freelancer's pipeline
+ *  on it would be absurd. */
+const BARE = ["/onboarding", "/intake/"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

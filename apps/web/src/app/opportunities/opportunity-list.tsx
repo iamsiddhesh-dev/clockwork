@@ -22,6 +22,29 @@ function fitColor(score: number | null) {
   return "var(--quiet)";
 }
 
+/** How each link state reads, and whether it blocks pitching. `gone` and
+ *  `closed` are the two the agent refuses to act on. */
+const LINK_STATE: Record<
+  Opportunity["link_status"],
+  { label: string; color: string; dead?: boolean }
+> = {
+  unchecked: { label: "link not checked", color: "var(--quiet)" },
+  live: { label: "checked live", color: "var(--ok)" },
+  closed: { label: "role closed", color: "var(--bad)", dead: true },
+  gone: { label: "posting gone", color: "var(--bad)", dead: true },
+  unreachable: { label: "couldn't check", color: "var(--warn)" },
+};
+
+function checkedAgo(iso: string | null): string {
+  if (!iso) return "";
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return " · just now";
+  if (minutes < 60) return ` · ${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return ` · ${hours}h ago`;
+  return ` · ${Math.round(hours / 24)}d ago`;
+}
+
 const STATUS_LABEL: Record<Opportunity["status"], string> = {
   new: "unscored",
   scored: "scored",
@@ -37,7 +60,9 @@ export function OpportunityList({
 }: {
   initial: Opportunity[];
   sources: Source[];
-  hasProfile: boolean;
+  /** `undefined` means the profile could not be read, which is not the
+   *  same as there not being one -- see the page's comment. */
+  hasProfile: boolean | undefined;
 }) {
   const [items, setItems] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null);
@@ -111,9 +136,9 @@ export function OpportunityList({
 
         <button
           className="cw-btn"
-          disabled={busy !== null || !hasProfile || unscored === 0}
+          disabled={busy !== null || hasProfile === false || unscored === 0}
           title={
-            !hasProfile
+            hasProfile === false
               ? "Fill in your profile first — scoring compares postings against it"
               : unscored === 0
                 ? "Nothing left to score"
@@ -131,11 +156,29 @@ export function OpportunityList({
           {busy === "score" ? "Scoring…" : `Score fit${unscored ? ` (${unscored} left)` : ""}`}
         </button>
 
+        <button
+          className="cw-btn"
+          disabled={busy !== null || visible.length === 0}
+          title="Check every posting still resolves and is still open"
+          onClick={() =>
+            run("verify", async (account) => {
+              const report = await api.verifyLinks(account, 40, true);
+              if (report.checked === 0) return "Every link was checked recently.";
+              const dead = report.gone + report.closed;
+              return dead > 0
+                ? `Checked ${report.checked} — ${report.live} live, ${dead} no longer open.`
+                : `Checked ${report.checked} — all still live.`;
+            })
+          }
+        >
+          {busy === "verify" ? "Checking…" : "Check links"}
+        </button>
+
         {note && <span style={{ fontSize: 12.5, color: "var(--dim)" }}>{note}</span>}
         {error && <span style={{ fontSize: 12.5, color: "var(--bad)" }}>{error}</span>}
       </div>
 
-      {!hasProfile && (
+      {hasProfile === false && (
         <div
           className="cw-card"
           style={{ padding: 18, borderColor: "var(--orange-bd)", background: "var(--orange-bg)" }}
@@ -161,19 +204,44 @@ export function OpportunityList({
           {visible.map((opportunity) => {
             const evidence = opportunity.fit_evidence?.evidence ?? [];
             const concerns = opportunity.fit_evidence?.concerns ?? [];
+            const link = LINK_STATE[opportunity.link_status] ?? LINK_STATE.unchecked;
             const canPitch =
-              hasProfile &&
+              hasProfile !== false &&
               opportunity.fit_score !== null &&
-              opportunity.status === "scored";
+              opportunity.status === "scored" &&
+              !link.dead;
 
             return (
-              <article key={opportunity.id} className="cw-card" style={{ padding: 24 }}>
+              <article
+                key={opportunity.id}
+                className="cw-card"
+                style={{
+                  padding: 24,
+                  // A dead posting stays visible -- it is evidence the
+                  // checking happened -- but stops competing for
+                  // attention with the ones worth reading.
+                  opacity: link.dead ? 0.55 : 1,
+                  borderColor: link.dead ? "var(--rim)" : undefined,
+                }}
+              >
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 24 }}>
                   <div style={{ flex: "1 1 340px", minWidth: 0 }}>
-                    <div className="cw-label">
-                      {SOURCE_LABEL[sourceKind(opportunity.source_id)] ?? "Unknown source"}
-                      {opportunity.author ? ` · ${opportunity.author}` : ""}
-                      {opportunity.posted_at ? ` · ${formatDate(opportunity.posted_at)}` : ""}
+                    <div className="cw-row" style={{ gap: 10 }}>
+                      <span className="cw-label">
+                        {SOURCE_LABEL[sourceKind(opportunity.source_id)] ?? ""}
+                        {opportunity.author ? `${sourceKind(opportunity.source_id) ? " · " : ""}${opportunity.author}` : ""}
+                        {opportunity.posted_at ? ` · ${formatDate(opportunity.posted_at)}` : ""}
+                      </span>
+                      <span
+                        className="cw-mono"
+                        style={{ fontSize: 10.5, color: link.color }}
+                        title={opportunity.link_note ?? undefined}
+                      >
+                        {link.label}
+                        {opportunity.link_status !== "unchecked"
+                          ? checkedAgo(opportunity.link_checked_at)
+                          : ""}
+                      </span>
                     </div>
 
                     <h2
@@ -277,11 +345,14 @@ export function OpportunityList({
                           className="cw-btn cw-btn-sm cw-btn-primary"
                           disabled={!canPitch || busy !== null}
                           title={
-                            !hasProfile
-                              ? "A pitch has to cite your portfolio — fill in your profile first"
-                              : opportunity.fit_score === null
-                                ? "Score it first, so the pitch has evidence to cite"
-                                : undefined
+                            link.dead
+                              ? opportunity.link_note ??
+                                "This posting is no longer open — pitching it would waste your time"
+                              : hasProfile === false
+                                ? "A pitch has to cite your portfolio — fill in your profile first"
+                                : opportunity.fit_score === null
+                                  ? "Score it first, so the pitch has evidence to cite"
+                                  : undefined
                           }
                           onClick={() =>
                             run(`pitch-${opportunity.id}`, async (account) => {
@@ -313,6 +384,12 @@ export function OpportunityList({
                       >
                         Dismiss
                       </button>
+
+                      {link.dead && (
+                        <span style={{ flex: "1 1 100%", fontSize: 12.5, color: "var(--bad)" }}>
+                          Not pitchable: {opportunity.link_note ?? "the posting is no longer open"}.
+                        </span>
+                      )}
                     </div>
                   </div>
 

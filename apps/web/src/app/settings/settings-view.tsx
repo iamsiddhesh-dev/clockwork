@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Profile } from "@/lib/api";
 import { clearAccount, readAccount } from "@/lib/account";
 import { ProfileForm } from "@/app/profile/profile-form";
@@ -95,6 +95,17 @@ export function SettingsView({
   const router = useRouter();
   const { ambient, toggleAmbient, theme, toggleTheme } = useShell();
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Built on the client so it carries whatever origin the app is
+  // actually being served from -- a hard-coded localhost would be wrong
+  // the moment this is deployed, and wrong in exactly the way nobody
+  // notices until a client clicks it.
+  const [intakeUrl, setIntakeUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const account = readAccount();
+    setIntakeUrl(account ? `${window.location.origin}/intake/${account}` : null);
+  }, []);
 
   return (
     <>
@@ -154,6 +165,67 @@ export function SettingsView({
             <Toggle on={theme === "light"} onClick={toggleTheme} label="Light theme" />
           </Row>
         </div>
+      </Card>
+
+      <Card pad={26} style={{ maxWidth: 760 }}>
+        <SectionHead title="Your intake link" />
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontSize: 13.5,
+            lineHeight: 1.6,
+            color: "var(--dim)",
+            maxWidth: "62ch",
+          }}
+        >
+          Put this anywhere a client might find you. A message posted here wakes the agent
+          immediately — it qualifies the lead, opens a thread, and drafts a reply for your approval
+          before the sender has closed the tab. This is the second of the two triggers; the other is
+          the clock.
+        </p>
+        <div className="cw-row" style={{ marginTop: 16, gap: 10 }}>
+          <code
+            className="cw-mono cw-scroll-x"
+            style={{
+              flex: "1 1 340px",
+              minWidth: 0,
+              border: "1px solid var(--rim)",
+              borderRadius: "var(--r-ctl)",
+              padding: "10px 13px",
+              fontSize: 12,
+              whiteSpace: "nowrap",
+              color: "var(--sub)",
+            }}
+          >
+            {intakeUrl ?? "—"}
+          </code>
+          <button
+            className="cw-btn"
+            disabled={!intakeUrl}
+            onClick={() => {
+              if (!intakeUrl) return;
+              navigator.clipboard?.writeText(intakeUrl).then(
+                () => setCopied(true),
+                // Clipboard access is refused in some contexts; the URL
+                // is on screen and selectable either way.
+                () => setCopied(false),
+              );
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+          {intakeUrl && (
+            <a className="cw-btn" href={intakeUrl} target="_blank" rel="noopener noreferrer">
+              Open
+            </a>
+          )}
+        </div>
+        {!profile?.name && (
+          <p style={{ margin: "12px 0 0", fontSize: 12.5, color: "var(--warn)" }}>
+            The link won&rsquo;t work until your profile has a name — there would be nobody for it to
+            say it reaches.
+          </p>
+        )}
       </Card>
 
       <Card pad={26} style={{ maxWidth: 760 }}>

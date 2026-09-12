@@ -7,6 +7,7 @@ Routes:
   GET   /runs/{id}/events?account= -> SSE stream of agent_event rows
   GET   /threads                   -> list threads (Threads view)
   GET   /threads/{id}              -> thread + messages + its deal
+  GET   /search?q=                 -> one ranked list across every entity
   GET   /summary                   -> chrome poll: badge, spend, next wake
   GET   /overview                  -> everything the dashboard renders
   GET   /deals                     -> list deals (pipeline table)
@@ -23,7 +24,8 @@ Routes:
                                        (the "e" in a/r/e)
   POST  /approvals/{id}/approve    -> approve + execute
   POST  /approvals/{id}/reject     -> reject, no side effect
-  POST  /intake/{slug}             -> public, no auth -- creates thread +
+  GET   /intake/{id}               -> public: who this intake link reaches
+  POST  /intake/{id}               -> public, no auth -- creates thread +
                                        message, fires a run
   GET   /clock                     -> current virtual time
   POST  /clock/advance             -> demo control: fast-forward + drain
@@ -65,13 +67,15 @@ from pydantic import BaseModel
 
 from . import clock
 from .agent import Trigger, run_agent
-from .auth import account_from_query, create_account, get_current_user_id
+from .auth import account_from_query, create_account, get_current_user_id, resolve_account
 from .context import run_context
 from .db import get_client
 from .executor import execute_approval
 from .overview import overview as build_overview, summary as build_summary
 from .scheduler import tick, tick_all_due
+from .search import search as run_search
 from .sources import ensure_sources, sync_sources
+from .sources.checking import verify_opportunities
 from .tools.money import chase_payment_for, draft_invoice_for, draft_quote_for
 from .tools.pitching import draft_pitch_for
 from .tools.sourcing import ProfileMissingError, score_unscored
@@ -395,6 +399,22 @@ def score_opportunities(
             raise HTTPException(400, str(exc)) from exc
 
 
+class VerifyRequest(BaseModel):
+    limit: int = 40
+    force: bool = False
+
+
+@app.post("/opportunities/verify")
+def verify_links(req: VerifyRequest, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Check that each sourced posting still resolves and is still open.
+
+    Results are stored, not recomputed per page load -- a check is a
+    round trip to someone else's server. See sources/verify.py for why
+    this is plain HTTP and not a headless browser.
+    """
+    return verify_opportunities(user_id, limit=req.limit, force=req.force)
+
+
 @app.post("/opportunities/{opportunity_id}/pitch")
 def pitch_opportunity(
     opportunity_id: str, user_id: str = Depends(get_current_user_id)
@@ -431,6 +451,11 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
     with run_context(user_id=user_id, run_id=None):
         sync = sync_sources(user_id)
 
+        # Check the links before spending model calls on them. Scoring a
+        # posting that was filled last month costs real tokens to produce
+        # a number nobody should act on.
+        links = verify_opportunities(user_id, limit=req.score_limit * 3)
+
         try:
             scoring = score_unscored(limit=req.score_limit)
         except ProfileMissingError as exc:
@@ -461,6 +486,7 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
 
     return {
         "sourced": sync,
+        "links": links,
         "scored": {"scored": scoring["scored"], "failed": scoring["failed"]},
         "pitched": [
             {"opportunity_id": p["opportunity_id"], "approval_id": p["approval_id"]}
@@ -485,6 +511,20 @@ def dismiss_opportunity(
     if not res.data:
         raise HTTPException(404, "opportunity not found")
     return res.data[0]
+
+
+# ── search ──────────────────────────────────────────────────────────────
+
+
+@app.get("/search")
+def get_search(q: str = "", user_id: str = Depends(get_current_user_id)) -> dict:
+    """Search postings, conversations, deals, invoices and runs at once.
+
+    One endpoint rather than per-screen filtering, because the header box
+    promises to search everything and a promise the UI cannot keep is
+    worse than no box at all. See search.py.
+    """
+    return run_search(user_id, q)
 
 
 # ── dashboard ───────────────────────────────────────────────────────────
@@ -797,11 +837,39 @@ class IntakeRequest(BaseModel):
     message: str
 
 
+@app.get("/intake/{user_id}")
+def intake_details(user_id: str) -> dict:
+    """What the public intake form needs to render: who it reaches.
+
+    Public by necessity -- the person filling this in is a stranger with
+    no workspace. It returns only what a freelancer would put on their
+    own landing page anyway (name, headline, one-line overview) and
+    nothing about their pipeline, rates or clients.
+    """
+    resolve_account(user_id)
+    res = (
+        get_client()
+        .table("profile")
+        .select("name, title, positioning")
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise HTTPException(404, "this intake link has no profile behind it yet")
+    return res.data
+
+
 @app.post("/intake/{user_id}")
 def intake(user_id: str, req: IntakeRequest) -> dict:
-    """Public, unauthenticated. `user_id` stands in for a per-freelancer
-    slug for now -- swap for a real short slug -> user_id lookup once the
-    profile table grows one."""
+    """Public, unauthenticated -- the point of a lead-capture form is
+    that strangers can post to it.
+
+    The workspace id is checked first so a mistyped link fails as a clean
+    404 rather than inserting orphan rows keyed to a workspace that does
+    not exist.
+    """
+    resolve_account(user_id)
     client = get_client()
 
     thread = (

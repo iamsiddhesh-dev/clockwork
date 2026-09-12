@@ -124,6 +124,64 @@ function ClockControl() {
   );
 }
 
+/**
+ * The header box from the design. It does not filter the current screen
+ * -- it hands the term to the real search, which queries every entity.
+ * A box labelled "search clients, quotes, runs" that only filtered the
+ * list you happened to be looking at would be a promise the UI cannot
+ * keep, and the first search from the wrong screen would teach the user
+ * it was broken.
+ */
+function SearchBox() {
+  const router = useRouter();
+  const [term, setTerm] = useState("");
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (term.trim().length < 2) return;
+    router.push(`/search?q=${encodeURIComponent(term.trim())}`);
+    setTerm("");
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="cw-hide-sm"
+      style={{
+        flex: "1 1 180px",
+        maxWidth: 340,
+        margin: "0 auto",
+        display: "flex",
+        alignItems: "center",
+        gap: 9,
+        border: "1px solid var(--rim)",
+        background: "var(--glass)",
+        borderRadius: 999,
+        padding: "9px 15px",
+        boxShadow: "var(--hi)",
+      }}
+    >
+      <Icon name="search" size={14} strokeWidth={1.9} />
+      <input
+        value={term}
+        onChange={(e) => setTerm(e.target.value)}
+        placeholder="Search clients, postings, invoices"
+        aria-label="Search everything"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          border: 0,
+          outline: 0,
+          background: "none",
+          fontFamily: "inherit",
+          fontSize: 13,
+          color: "var(--ink)",
+        }}
+      />
+    </form>
+  );
+}
+
 export function TopBar() {
   const pathname = usePathname();
   const { theme, toggleTheme, summary } = useShell();
@@ -160,6 +218,8 @@ export function TopBar() {
         >
           {active?.title ?? "Clockwork"}
         </span>
+
+        <SearchBox />
 
         <div
           style={{

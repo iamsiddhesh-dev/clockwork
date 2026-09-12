@@ -34,18 +34,27 @@ export const PRIMARY_NAV: NavItem[] = [
   },
 ];
 
+/** Reachable from the header box rather than the sidebar, but it still
+ *  needs a title, so it lives in the map. */
+export const UNLISTED_NAV: NavItem[] = [
+  { href: "/search", label: "Search", icon: "search", title: "Search" },
+];
+
 export const SECONDARY_NAV: NavItem[] = [
   { href: "/settings", label: "Settings", icon: "settings", title: "Settings", also: ["/profile"] },
 ];
 
 export const ALL_NAV = [...PRIMARY_NAV, ...SECONDARY_NAV];
 
+/** Everything with a title, including screens the sidebar doesn't list. */
+const TITLED_NAV = [...ALL_NAV, ...UNLISTED_NAV];
+
 /** Longest match wins, so /runs/abc picks Runs rather than falling
  *  through to whichever item happens to be listed first. */
 export function activeItem(pathname: string): NavItem | null {
   let best: NavItem | null = null;
   let bestLength = -1;
-  for (const item of ALL_NAV) {
+  for (const item of TITLED_NAV) {
     for (const prefix of [item.href, ...(item.also ?? [])]) {
       if (
         (pathname === prefix || pathname.startsWith(`${prefix}/`)) &&

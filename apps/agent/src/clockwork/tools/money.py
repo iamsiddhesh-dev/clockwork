@@ -195,24 +195,32 @@ def render_invoice(invoice: dict) -> str:
     return "\n".join(lines)
 
 
-def _next_invoice_number(user_id: str) -> str:
-    """Sequential per freelancer, e.g. INV-0007.
+def _next_invoice_number_from(rows: list[dict]) -> str:
+    """Pick the next invoice number given the ones already issued.
 
-    Derived from the highest number already issued rather than a row
-    count, so voiding an invoice doesn't cause the next one to reuse a
-    number that a client has already seen. `unique (user_id, number)` in
-    the schema is the real guard against a race here; this just picks a
-    sensible next value.
+    Derived from the highest number seen rather than a row count, so
+    voiding an invoice doesn't cause the next one to reuse a number a
+    client has already seen. `unique (user_id, number)` in the schema is
+    the real guard against a race; this just picks a sensible next value.
+
+    Split from the query so it can be tested without a database -- the
+    off-by-one that reissues a number is exactly the kind of bug that
+    only shows up in front of a client.
     """
-    rows = (
-        get_client().table("invoice").select("number").eq("user_id", user_id).execute()
-    ).data or []
     highest = 0
     for row in rows:
         match = re.search(r"(\d+)", row.get("number") or "")
         if match:
             highest = max(highest, int(match.group(1)))
     return f"INV-{highest + 1:04d}"
+
+
+def _next_invoice_number(user_id: str) -> str:
+    """Sequential per freelancer, e.g. INV-0007."""
+    rows = (
+        get_client().table("invoice").select("number").eq("user_id", user_id).execute()
+    ).data or []
+    return _next_invoice_number_from(rows)
 
 
 def _load_deal(deal_id: str, user_id: str) -> dict:

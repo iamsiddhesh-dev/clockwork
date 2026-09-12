@@ -19,6 +19,7 @@ from ..context import current_user_id
 from ..db import get_client
 from ..ledger import invoke_model
 from ..models import Role
+from ..sources.checking import is_dead
 from .approvals import create_approval
 from .scheduling import write_task
 
@@ -51,6 +52,17 @@ def draft_pitch_for(opportunity_id: str) -> dict:
     if not opp_res or not opp_res.data:
         raise ValueError(f"opportunity {opportunity_id} not found")
     opp = opp_res.data
+
+    # The guard that makes link verification worth having. Writing to a
+    # role that was filled three weeks ago wastes the freelancer's time
+    # and is visibly sloppy to the one person they were trying to
+    # impress -- so it is refused here rather than left to whoever reads
+    # the approval card to notice.
+    if is_dead(opp.get("link_status")):
+        raise ValueError(
+            f"this posting is {opp['link_status']} — {opp.get('link_note') or 'the link no longer resolves'}. "
+            "Pitching a role that has already closed is worse than not pitching at all."
+        )
 
     profile = _load_profile(user_id)
     if not profile:

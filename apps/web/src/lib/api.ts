@@ -114,9 +114,24 @@ export type Opportunity = {
   fit_rationale: string | null;
   fit_evidence: { evidence?: string[]; concerns?: string[] } | null;
   status: "new" | "scored" | "pitched" | "dismissed" | "converted";
+  /** Whether the posting itself is still real. Checked with a plain HTTP
+   *  request, not a browser -- see apps/agent/src/clockwork/sources/verify.py. */
+  link_status: "unchecked" | "live" | "closed" | "gone" | "unreachable";
+  link_checked_at: string | null;
+  link_note: string | null;
+  link_final_url: string | null;
   deal_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type LinkCheckReport = {
+  checked: number;
+  live: number;
+  closed: number;
+  gone: number;
+  unreachable: number;
+  skipped: number;
 };
 
 export type Source = {
@@ -135,6 +150,7 @@ export type SyncReport = {
 
 export type KickoffResult = {
   sourced: SyncReport;
+  links: LinkCheckReport;
   scored: { scored: number; failed: number };
   pitched: { opportunity_id: string; approval_id: string }[];
   pitch_errors: { opportunity_id: string; error: string }[];
@@ -199,6 +215,21 @@ export type ChaseResult =
       days_overdue: number;
       body: string;
     };
+
+export type SearchHit = {
+  kind: "opportunity" | "thread" | "message" | "deal" | "invoice" | "run";
+  id: string;
+  title: string;
+  subtitle: string | null;
+  href: string;
+  meta: string | null;
+};
+
+export type SearchResult = {
+  query: string;
+  hits: SearchHit[];
+  note: string | null;
+};
 
 export type Summary = {
   now: string;
@@ -331,6 +362,9 @@ export const api = {
       cache: "no-store",
     }),
 
+  search: (account: string, q: string) =>
+    apiFetch<SearchResult>(`/search?q=${encodeURIComponent(q)}`, account, { cache: "no-store" }),
+
   summary: (account: string) =>
     apiFetch<Summary>(`/summary`, account, { cache: "no-store" }),
   overview: (account: string) =>
@@ -371,6 +405,11 @@ export const api = {
     apiFetch<Source[]>(`/sources`, account, { cache: "no-store" }),
   syncOpportunities: (account: string) =>
     apiFetch<SyncReport>(`/opportunities/sync`, account, { method: "POST" }),
+  verifyLinks: (account: string, limit = 40, force = false) =>
+    apiFetch<LinkCheckReport>(`/opportunities/verify`, account, {
+      method: "POST",
+      body: JSON.stringify({ limit, force }),
+    }),
   scoreOpportunities: (account: string, limit = 10) =>
     apiFetch<{ scored: number; failed: number }>(`/opportunities/score`, account, {
       method: "POST",

@@ -13,8 +13,12 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Onboarding is where a cookie-less visitor is supposed to end up, so
-  // it must never redirect to itself.
-  if (pathname.startsWith("/onboarding")) return NextResponse.next();
+  // it must never redirect to itself. /intake is the public lead-capture
+  // form -- the person filling it in is a stranger with no workspace,
+  // which is the whole point of it, so it must never be gated either.
+  if (pathname.startsWith("/onboarding") || pathname.startsWith("/intake/")) {
+    return NextResponse.next();
+  }
 
   if (!request.cookies.get(ACCOUNT_COOKIE)?.value) {
     return NextResponse.redirect(new URL("/onboarding", request.url));

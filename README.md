@@ -15,7 +15,7 @@ Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase
                             └────── every outbound step: Approve ──────┘
 ```
 
-1. **Sources real work** from three public feeds — Hacker News' monthly hiring thread, Remotive, and RemoteOK — filtered for contract and freelance postings.
+1. **Sources real work** from three public feeds — Hacker News' monthly hiring thread, Remotive, and RemoteOK — filtered for contract and freelance postings, then **checks every link is still live** before spending a model call on it.
 2. **Scores each one 0–100 against *your* profile**, with a written rationale and the specific evidence from your own portfolio that justifies it. Bad matches score low and stay low; it will not pitch something it doesn't believe in.
 3. **Drafts outreach in your voice**, quoting the case study that earned the score:
 
@@ -58,11 +58,31 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 | Hooks | `BeforeToolCallEvent` / `AfterToolCallEvent` / `AfterInvocationEvent` → the `agent_event` audit trail |
 | Model abstraction | One `Role` enum (orchestrator / writer / extractor) routed to different models per job |
 
+### Tests
+
+76 tests, stdlib `unittest`, no install step:
+
+```bash
+cd apps/agent && PYTHONPATH=src python -m unittest discover -s tests -t .
+```
+
+They cover the parts where being wrong costs real money or real leads: quote arithmetic and invoice numbering, payment-terms parsing, link classification (including the false-positive direction — a posting saying "applications close on 30 September" must not be marked closed), the exception-chain walk that a shipped bug got wrong, and the workflow-lane counting that another one got wrong. Every test is pure — no network, no database — so the suite runs in under 10ms.
+
 ### The tools
 
 `recall` · `get_thread` · `log_message` · `extract_requirements` · `qualify_lead` · `draft_reply`\* · `schedule_task` · `score_fit` · `draft_pitch`\* · `draft_quote`\* · `draft_invoice`\* · `chase_payment`\*
 
 \* approval-gated
+
+### Verified leads, not just sourced ones
+
+A posting filled three weeks ago is the worst thing to pitch: it wastes the freelancer's time and looks sloppy to the one person they were trying to impress. So every sourced link is checked before it is worth scoring, and an opportunity that comes back `gone` or `closed` **cannot be pitched** — `draft_pitch` refuses, rather than leaving it for whoever reads the approval card to notice.
+
+Four things are checked, in the order they actually fail: the host answers; the status isn't 404/410; it didn't redirect to a site root (the "listing removed, bounced to the homepage" pattern, which returns a cheerful 200); and the body doesn't say the role is closed. A 403 or 429 is recorded as **"couldn't check"**, never as "gone" — a board blocking the checker says nothing about the role, and quietly discarding good leads would be worse than the problem being solved.
+
+**Hacker News is checked through its item API rather than by scraping**, for two measured reasons. The web pages rate-limit hard — 19 of 28 checks came back 429 even paced 2.5 seconds apart — and the API exposes `deleted` and `dead` flags the rendered page hides, so a withdrawn posting that still *looks* fine in a browser is caught. On a real 84-posting workspace that took failures from 19 to 1 and the run from 201s to 41s, and found a genuinely deleted posting.
+
+This is deliberately plain HTTP and not a headless browser. All three sources put the posting in the HTML response, so Playwright would cost a 400MB install and seconds per link to learn what one request already knows.
 
 ### Three rules the money tail is built on
 
@@ -102,6 +122,8 @@ apps/agent/db/003_grants.sql
 apps/agent/db/004_sourcing.sql
 apps/agent/db/005_money.sql
 apps/agent/db/006_accounts.sql
+apps/agent/db/007_profile_fields.sql
+apps/agent/db/008_link_verification.sql
 
 # 2. Backend
 cd apps/agent
@@ -117,6 +139,14 @@ npm install && npm run dev
 ```
 
 Then open `http://localhost:3000`. There is no sign-in: the onboarding form is the front door, and filling it in creates your workspace. The agent goes to work the moment you finish it.
+
+To get a populated workspace without waiting on three job boards and a model provider:
+
+```bash
+cd apps/agent && python scripts/seed_demo.py
+```
+
+It prints a workspace id and the one-line cookie to set. Every row it writes is marked as demo data, and it deliberately does **not** fake agent runs, events or approvals — those are the audit trail, and inventing work the agent never did is exactly what the rest of this README refuses to do.
 
 ---
 
@@ -135,9 +165,12 @@ apps/agent/          FastAPI + the Strands agent
     models.py        per-role model routing and pricing
     overview.py      every dashboard number, computed from real rows
     scheduler.py     tick() — drains due tasks, fires the agent
-    sources/         one adapter per public feed
+    search.py        one ranked list across every entity
+    sources/         one adapter per public feed, plus link verification
     tools/           the 12 agent tools (money.py = quote/invoice/chase)
   db/                SQL migrations, applied in order
+  scripts/           seed_demo.py -- a populated workspace, no feeds needed
+  tests/             76 stdlib unittest cases, no network, no database
 
 apps/web/            Next.js 16 (App Router)
   src/app/
@@ -148,7 +181,9 @@ apps/web/            Next.js 16 (App Router)
     opportunities/   sourced leads, ranked by fit
     money/           quotes and invoices — accept, decline, mark paid, chase
     runs/            Run Trace — live SSE replay of any agent run
-    settings/        profile, spend cap, and the locked approval gate
+    settings/        profile, spend cap, intake link, locked approval gate
+    search/          cross-entity search
+    intake/[id]/     the public lead-capture form (no workspace needed)
 ```
 
 ---
@@ -161,7 +196,7 @@ Stated plainly, because a demo that hides these is worth less than one that does
 - **No payment processor.** Marking an invoice paid is a human action. There is no Stripe integration, no card data, and nothing here can move money — taking payment is not something this agent should be able to do, and faking a processor for a demo would misrepresent where the human stays in the loop.
 - **No tax handling on quotes.** VAT and sales tax depend on both parties' jurisdictions, which is a real compliance question rather than one to guess at. `subtotal` and `total` are separate columns so adding it later needs no migration.
 - **There is no authentication.** A workspace is created by filling in the onboarding form and identified from then on by an unguessable id in a cookie. Anyone holding that id can read and write that workspace — no password, no expiry, no revocation. That is a deliberate trade for a demo whose data you typed in thirty seconds ago, and the wrong trade for real client correspondence. `auth.py` says so in its own docstring rather than letting a UUID imply more than it delivers.
-- **No automated tests.** Every claim here was verified by hand against live feeds and a real database.
+- **No email is sent, so nothing here has a delivery guarantee.** See the first limit above.
 
 ## Licence
 

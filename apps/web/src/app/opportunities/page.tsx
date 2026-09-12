@@ -18,8 +18,13 @@ export default async function OpportunitiesPage() {
   // and profile can fail softly (they only decorate), but the list
   // itself must never render an empty state it did not actually read.
   const opportunities = await api.listOpportunities(account).catch(() => null);
+  // `null` from these two means the call FAILED; an empty list or an
+  // empty profile means the answer really is "none". Collapsing those
+  // together is what made this screen announce "No profile yet" over a
+  // workspace that plainly had one, which is the same class of lie as an
+  // empty state rendered from a failed fetch.
   const [sources, profile] = await Promise.all([
-    api.listSources(account).catch(() => []),
+    api.listSources(account).catch(() => null),
     api.getProfile(account).catch(() => null),
   ]);
 
@@ -27,7 +32,7 @@ export default async function OpportunitiesPage() {
 
   const live = opportunities.filter((o) => o.status !== "dismissed");
   const scored = live.filter((o) => o.fit_score !== null).length;
-  const perSource = sources
+  const perSource = (sources ?? [])
     .map((source) => {
       const count = live.filter((o) => o.source_id === source.id).length;
       return `${SOURCE_LABEL[source.kind] ?? source.kind} ${count}`;
@@ -62,8 +67,11 @@ export default async function OpportunitiesPage() {
       />
       <OpportunityList
         initial={opportunities}
-        sources={sources}
-        hasProfile={Boolean(profile?.name)}
+        sources={sources ?? []}
+        // Undefined rather than false when the profile could not be
+        // fetched, so the "you have no profile" banner only appears when
+        // that is actually known to be true.
+        hasProfile={profile === null ? undefined : Boolean(profile.name)}
       />
     </>
   );
