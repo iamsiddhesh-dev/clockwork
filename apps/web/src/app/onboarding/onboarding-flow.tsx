@@ -55,7 +55,14 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
   // doing this in the initial state made React hydrate an input holding
   // "UTC" over markup holding "Asia/Calcutta", which is exactly the
   // hydration mismatch warning.
+  // The browser's zone is only knowable in the browser. Seeding it in
+  // the initial state made the server render "UTC" into an input the
+  // client then rendered as "Asia/Calcutta", which is the hydration
+  // mismatch this effect exists to fix. The rule below is right about
+  // the general case and wrong about this one: one extra render at
+  // mount is the price of the markup agreeing with itself.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setForm((f) => (f.timezone ? f : { ...f, timezone: guessTimeZone() }));
   }, []);
   const [touched, setTouched] = useState(false);

@@ -1,12 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { api, type AccountRecord, type Profile } from "@/lib/api";
 import { clearAccount, readAccount } from "@/lib/account";
 import { ProfileForm } from "@/app/profile/profile-form";
 import { Card, SectionHead } from "@/components/ui";
 import { useShell } from "@/components/shell/shell-context";
+
+/** Neither the page origin nor the workspace cookie changes without a
+ *  navigation, so there is genuinely nothing to subscribe to. */
+const subscribeNever = () => () => {};
+const readOrigin = () => window.location.origin;
+const readNothing = () => "";
 
 function Row({
   title,
@@ -96,19 +102,21 @@ export function SettingsView({
   account: AccountRecord | null;
   dailyCapUsd: number;
 }) {
-  const router = useRouter();
   const { ambient, toggleAmbient, theme, toggleTheme } = useShell();
   const [copied, setCopied] = useState(false);
 
   // Built on the client so it carries whatever origin the app is
   // actually being served from -- a hard-coded localhost would be wrong
   // the moment this is deployed, and wrong in exactly the way nobody
-  // notices until a client clicks it.
-  const [intakeUrl, setIntakeUrl] = useState<string | null>(null);
-  useEffect(() => {
-    const account = readAccount();
-    setIntakeUrl(account ? `${window.location.origin}/intake/${account}` : null);
-  }, []);
+  // notices until a client clicks it. The server has no origin to offer,
+  // so it says so with an empty snapshot rather than rendering a link
+  // that is wrong for one frame.
+  //
+  // The workspace id comes from the account the page already fetched,
+  // not from re-reading the cookie: if those two ever disagreed, this
+  // would hand a client a link into the wrong workspace.
+  const origin = useSyncExternalStore(subscribeNever, readOrigin, readNothing);
+  const intakeUrl = origin && account?.id ? `${origin}/intake/${account.id}` : null;
 
   return (
     <>

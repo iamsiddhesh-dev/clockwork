@@ -74,11 +74,13 @@ export function Field({
  * the window.
  */
 function Menu({
+  id,
   anchor,
   menuRef,
   children,
   onMouseDown,
 }: {
+  id: string;
   anchor: React.RefObject<HTMLElement | null>;
   menuRef: React.RefObject<HTMLDivElement | null>;
   children: React.ReactNode;
@@ -128,7 +130,9 @@ function Menu({
 
   return createPortal(
     <div
+      id={id}
       ref={menuRef}
+      role="listbox"
       onMouseDown={(e) => {
         // Keep focus in the input so blur doesn't close the menu before
         // the click registers -- the classic dropdown-that-won't-click bug.
@@ -284,6 +288,7 @@ export function Combobox({
   const [highlight, setHighlight] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   // What the input shows: the committed value when closed, the search
   // term while open.
@@ -355,6 +360,10 @@ export function Combobox({
         className="cw-input"
         role="combobox"
         aria-expanded={open}
+        // Only while the list exists: pointing at an element that is not
+        // in the document is worse for a screen reader than pointing at
+        // nothing.
+        aria-controls={open ? listId : undefined}
         aria-autocomplete="list"
         value={shown}
         placeholder={placeholder}
@@ -386,7 +395,7 @@ export function Combobox({
       <Caret open={open} />
 
       {open && (
-        <Menu anchor={wrap} menuRef={menu}>
+        <Menu id={listId} anchor={wrap} menuRef={menu}>
           {matches.length === 0 ? (
             <div style={{ padding: "12px 11px", fontSize: 13, color: "var(--quiet)" }}>
               {strict ? "No match." : "Nothing on the list — what you typed will be used."}
@@ -442,6 +451,7 @@ export function TagInput({
   const [highlight, setHighlight] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   const lower = useMemo(() => new Set(values.map((v) => v.toLowerCase())), [values]);
 
@@ -599,7 +609,7 @@ export function TagInput({
       </div>
 
       {open && matches.length > 0 && (
-        <Menu anchor={wrap} menuRef={menu}>
+        <Menu id={listId} anchor={wrap} menuRef={menu}>
           {matches.map((skill, index) => (
             <Row key={skill} active={index === highlight} onClick={() => add(skill)}>
               {skill}

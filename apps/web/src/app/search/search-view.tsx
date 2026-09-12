@@ -63,14 +63,17 @@ export function SearchView() {
     }
   }, []);
 
+  // Too short to search is a fact about the query, not a thing to store
+  // and keep in sync. It used to clear `result` from inside this effect,
+  // which is a state write that exists only to mirror something already
+  // derivable -- and one more render every time someone hits backspace.
+  const tooShort = query.trim().length < 2;
+
   useEffect(() => {
-    if (query.trim().length < 2) {
-      setResult(null);
-      return;
-    }
+    if (tooShort) return;
     const id = window.setTimeout(() => run(query), DEBOUNCE_MS);
     return () => window.clearTimeout(id);
-  }, [query, run]);
+  }, [query, tooShort, run]);
 
   // Keep the URL honest, so a search can be shared or reloaded.
   useEffect(() => {
@@ -81,7 +84,7 @@ export function SearchView() {
     return () => window.clearTimeout(id);
   }, [query, router]);
 
-  const hits = result?.hits ?? [];
+  const hits = tooShort ? [] : (result?.hits ?? []);
 
   return (
     <>

@@ -89,22 +89,36 @@ export function OpportunityList({
 
   const load = useCallback(
     async (target: number) => {
-      const result = await api.listOpportunities(requireAccountClient(), {
-        limit: pageSize,
-        offset: (target - 1) * pageSize,
-      });
-      // Dismissing the last row on the last page leaves that page empty
-      // and unreachable-looking. Step back rather than showing a blank
-      // list under a pager that says there are items.
-      if (result.items.length === 0 && target > 1 && result.total > 0) {
-        return load(Math.min(target - 1, Math.max(1, Math.ceil(result.total / pageSize))));
+      // Walks back a page at a time rather than calling itself. A
+      // `useCallback` that recurses captures the identity it had when it
+      // was created, so the recursive call is a stale closure the moment
+      // any dependency changes -- and the lint rule that flags it is
+      // right that this is a bug waiting rather than a style note. A
+      // loop has no identity to go stale.
+      let want = Math.max(1, target);
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const result = await api.listOpportunities(requireAccountClient(), {
+          limit: pageSize,
+          offset: (want - 1) * pageSize,
+        });
+
+        // Dismissing the last row on the last page leaves that page
+        // empty and unreachable-looking. Step back rather than showing a
+        // blank list under a pager that says there are items.
+        const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
+        if (result.items.length === 0 && want > 1 && result.total > 0 && want > lastPage) {
+          want = Math.min(want - 1, lastPage);
+          continue;
+        }
+
+        setItems(result.items);
+        setTotal(result.total);
+        setPage(want);
+        // The header's counts are server-rendered from the whole
+        // workspace, so they go stale whenever this changes the data.
+        router.refresh();
+        return;
       }
-      setItems(result.items);
-      setTotal(result.total);
-      setPage(target);
-      // The header's counts are server-rendered from the whole
-      // workspace, so they go stale whenever this changes the data.
-      router.refresh();
     },
     [pageSize, router],
   );

@@ -4,7 +4,7 @@ import { formatDate } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, compactMoney, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
-import { offsetFor, PAGE_SIZE, pageFrom, pageHref } from "@/lib/paging";
+import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
@@ -133,7 +133,7 @@ export default async function DealsPage({ searchParams }: PageProps<"/deals">) {
         pageSize={PAGE_SIZE}
         total={total}
         noun="deal"
-        href={(n) => pageHref("/deals", n)}
+        basePath="/deals"
       />
     </>
   );

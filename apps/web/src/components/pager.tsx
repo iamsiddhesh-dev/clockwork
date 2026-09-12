@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { pageHref } from "@/lib/paging";
 
 /**
  * One pager for every list in the app.
@@ -11,8 +12,17 @@ import Link from "next/link";
  * or opened in a new tab. An interactive list (Opportunities, which
  * dismisses and scores rows in place) pages in component state, because
  * a navigation there would throw away the work it just did. Same
- * control, same behaviour, two ways of moving: pass `href` for the first
- * and `onPage` for the second.
+ * control, same behaviour, two ways of moving: pass `basePath` for the
+ * first and `onPage` for the second.
+ *
+ * `basePath` is a string and not a `(page) => string` builder for a
+ * reason that is not style. This is a client component, and the pages
+ * that use it are server components: React has to serialise every prop
+ * across that boundary, and a function cannot be serialised. The builder
+ * version typechecked, built clean, and then threw "Functions cannot be
+ * passed directly to Client Components" on every request to a paginated
+ * page. A string prop makes that mistake unrepresentable rather than
+ * merely documented.
  *
  * It renders nothing at all when everything fits on one page. A pager
  * under a list of four items is noise pretending to be a feature.
@@ -21,7 +31,7 @@ export function Pager({
   page,
   pageSize,
   total,
-  href,
+  basePath,
   onPage,
   busy,
   noun = "item",
@@ -30,7 +40,9 @@ export function Pager({
   page: number;
   pageSize: number;
   total: number;
-  href?: (page: number) => string;
+  /** The route this list lives at, e.g. "/runs". Page numbers become
+   *  `?page=N` against it. */
+  basePath?: string;
   onPage?: (page: number) => void;
   busy?: boolean;
   noun?: string;
@@ -60,7 +72,7 @@ export function Pager({
           to={current - 1}
           disabled={current === 1 || busy}
           label="Previous page"
-          href={href}
+          basePath={basePath}
           onPage={onPage}
         >
           &lsaquo;
@@ -82,7 +94,7 @@ export function Pager({
               current={entry === current}
               disabled={busy}
               label={`Page ${entry}`}
-              href={href}
+              basePath={basePath}
               onPage={onPage}
             >
               {entry}
@@ -94,7 +106,7 @@ export function Pager({
           to={current + 1}
           disabled={current === pages || busy}
           label="Next page"
-          href={href}
+          basePath={basePath}
           onPage={onPage}
         >
           &rsaquo;
@@ -136,7 +148,7 @@ function Step({
   current,
   disabled,
   label,
-  href,
+  basePath,
   onPage,
   children,
 }: {
@@ -144,7 +156,7 @@ function Step({
   current?: boolean;
   disabled?: boolean;
   label: string;
-  href?: (page: number) => string;
+  basePath?: string;
   onPage?: (page: number) => void;
   children: React.ReactNode;
 }) {
@@ -178,9 +190,9 @@ function Step({
     );
   }
 
-  if (href) {
+  if (basePath) {
     return (
-      <Link href={href(to)} aria-label={label} style={style}>
+      <Link href={pageHref(basePath, to)} aria-label={label} style={style}>
         {children}
       </Link>
     );

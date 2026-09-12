@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { api, type Summary } from "@/lib/api";
 import { readAccount } from "@/lib/account";
@@ -54,6 +55,11 @@ function write(key: string, value: string) {
  *  runs every 30s, so anything faster just asks the same question twice. */
 const SUMMARY_POLL_MS = 30_000;
 
+/** The workspace id only changes by signing in or out, both of which
+ *  navigate, so there is genuinely nothing to subscribe to. */
+const subscribeNever = () => () => {};
+const serverHasNoCookie = () => null;
+
 export function ShellProvider({ children }: { children: React.ReactNode }) {
   // Initialised from what the no-flash script already put on <html>, so
   // the first client render agrees with the server-sent markup instead
@@ -62,7 +68,19 @@ export function ShellProvider({ children }: { children: React.ReactNode }) {
   const [ambient, setAmbient] = useState(true);
   const [summary, setSummary] = useState<Summary | null>(null);
 
+  // Read after mount rather than during render, and knowingly at the
+  // cost of one extra render at startup.
+  //
+  // The lint rule against setState in an effect is right about the
+  // general case and wrong about this one. The alternative is to read
+  // localStorage in the initial state, which the server cannot do -- so
+  // the server would render "dark" and the browser would render
+  // "light", and React would hydrate a control into markup that
+  // disagrees with it. Trading one render for a hydration mismatch is
+  // the wrong way round.
+  //
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(read(THEME_KEY, "dark") === "light" ? "light" : "dark");
     setAmbient(read(AMBIENT_KEY, "on") !== "off");
   }, []);
@@ -77,8 +95,12 @@ export function ShellProvider({ children }: { children: React.ReactNode }) {
     write(AMBIENT_KEY, ambient ? "on" : "off");
   }, [ambient]);
 
-  const [account, setAccount] = useState<string | null>(null);
-  useEffect(() => setAccount(readAccount()), []);
+  // The cookie is an external store, so it gets the hook meant for
+  // external stores rather than a state-plus-effect imitation of one.
+  // `null` on the server is the honest answer -- it has no cookie to
+  // read -- and there is nothing to subscribe to, because the workspace
+  // id cannot change without a navigation.
+  const account = useSyncExternalStore(subscribeNever, readAccount, serverHasNoCookie);
 
   const refreshSummary = useCallback(() => {
     const id = readAccount();

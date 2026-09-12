@@ -4,7 +4,7 @@ import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
-import { offsetFor, PAGE_SIZE, pageFrom, pageHref } from "@/lib/paging";
+import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +78,7 @@ export default async function ThreadsPage({ searchParams }: PageProps<"/threads"
         pageSize={PAGE_SIZE}
         total={total}
         noun="thread"
-        href={(n) => pageHref("/threads", n)}
+        basePath="/threads"
       />
     </>
   );
