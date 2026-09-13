@@ -54,7 +54,7 @@ Models run on Groq's free tier (8,000 tokens per minute per model). If a step re
 |---|---|
 | `Agent` + `@tool` | 12 typed tools: `recall`, `get_thread`, `log_message`, `extract_requirements`, `qualify_lead`, `draft_reply`, `schedule_task`, `score_fit`, `draft_pitch`, `draft_quote`, `draft_invoice`, `chase_payment` |
 | `structured_output_model` | Pydantic schemas for fit scores, lead qualification, requirement extraction, quote line items and the profile import |
-| Hooks | `BeforeToolCallEvent`, `AfterToolCallEvent`, `AfterInvocationEvent` record each tool call's latency, tokens and cost; the Run Trace streams them live |
+| Hooks | `BeforeToolCallEvent`, `AfterToolCallEvent`, `AfterInvocationEvent` record each tool call's input, result and latency; model tokens and cost go to a ledger; the Run Trace streams both live |
 | `ModelRetryStrategy` | Subclassed to also retry the provider's rate-limit error, retrying only the refused model call rather than the whole run |
 | LiteLLM model provider | Models routed by role on Groq (below) |
 
