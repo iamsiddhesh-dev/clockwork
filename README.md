@@ -17,14 +17,10 @@ Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase
 
 1. **Sources real work** from three public feeds — Hacker News' monthly hiring thread, Remotive, and RemoteOK — filtered for contract and freelance postings, then **checks every link is still live** before spending a model call on it.
 2. **Scores each one 0–100 against your real work, and shows its proof.** The scorer is handed a numbered list of your actual repositories (straight from the GitHub API), portfolio projects and skills, and every reason it gives must cite one of them. Code then checks each citation exists, drops anything invented, and caps the score: **a strong match (60+) needs a real project**, skills alone top out at 59, and no valid evidence caps it at 40. Each reason on the card links to the repository or page it rests on, so a score can be verified by clicking.
-3. **Drafts outreach in your voice when you choose to pitch** — nothing is drafted for you unasked — quoting the case study that earned the score:
-
-   > *"I recently migrated a legacy invoicing flow to Stripe Billing for a B2B SaaS, cutting failed-payment churn by 40%."*
-
-   That sentence is generated, but the 40% comes from the user's own portfolio entry. Nothing is invented.
-4. **Prices the work, invoices it, and chases the money.** A quote is broken into lines the client can actually evaluate, priced off the freelancer's own rates. Once they accept, it raises the invoice and arms a chaser whose tone escalates with each unanswered reminder — because the fourth reminder reading exactly like the first is why people stop sending them.
-5. **Waits for you.** Every client-facing action queues in an Approval Inbox showing four things: what it will do, why, what it read, and what changes in the database. Nothing is ever sent without a human pressing approve.
-6. **Acts on its own schedule.** When a message goes out, a follow-up is scheduled automatically. Days later the agent wakes up, re-reads the thread, and decides whether to nudge — or correctly does nothing if the client already replied.
+3. **Drafts a pitch when you choose to** — no pitch is drafted unasked — built on the project that earned the score. It always greets "Hi there,", because job boards give a username or a company, never a person's name.
+4. **Prices the work, invoices it, and chases the money.** A quote is broken into lines the client can actually evaluate, priced off the freelancer's own rates. Once you record that the client accepted, you raise the invoice, and sending it arms a payment check whose reminder tone escalates with each one sent — because the fourth reminder reading exactly like the first is why people stop sending them.
+5. **Waits for you.** Every client-facing action queues in an Approval Inbox showing four things: what it will do, why, what it read, and what changes in the database. Nothing is marked sent without a human pressing approve, and nothing is emailed at all — see Known limits.
+6. **Acts on its own schedule.** Drafting a pitch or reply, or sending a quote or invoice, schedules a check-in automatically. Days later the agent wakes up, re-reads the thread, and decides whether to nudge — or correctly does nothing if the client already replied.
 
 ### Two kinds of trigger, and your own buttons
 
@@ -53,20 +49,20 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 
 | Feature | How |
 |---|---|
-| `@tool` | 12 typed tools, all of which mutate real business state |
+| `@tool` | 12 typed tools: 9 change business state; `recall`, `get_thread` and `extract_requirements` only read |
 | `structured_output_model=` | Pydantic schemas for fit scores, lead qualification, requirement extraction, quote line items and the profile import |
 | Hooks | `BeforeToolCallEvent` / `AfterToolCallEvent` / `AfterInvocationEvent` → the `agent_event` audit trail |
 | Model abstraction | One `Role` enum (orchestrator / reader / writer / extractor) routed to different models per job |
 
 ### Tests
 
-148 tests, stdlib `unittest`, no install step:
+154 tests, stdlib `unittest`, no install step:
 
 ```bash
 cd apps/agent && PYTHONPATH=src python -m unittest discover -s tests -t .
 ```
 
-They cover the parts where being wrong costs real money or real leads: quote arithmetic and invoice numbering, payment-terms parsing, link classification (including the false-positive direction — a posting saying "applications close on 30 September" must not be marked closed), the exception-chain walk that a shipped bug got wrong, the workflow-lane counting that another one got wrong, and the page-window arithmetic behind every paginated list — off by one there silently repeats a row on one page and drops it from the next. Every test is pure — no network, no database — so the suite runs in under 10ms.
+They cover the parts where being wrong costs real money or real leads: quote arithmetic and invoice numbering, payment-terms parsing, link classification (including the false-positive direction — a posting saying "applications close on 30 September" must not be marked closed), the exception-chain walk that a shipped bug got wrong, the workflow-lane counting that another one got wrong, and the page-window arithmetic behind every paginated list — off by one there silently repeats a row on one page and drops it from the next. Every test is pure — no network, no database — so the suite runs in well under a second.
 
 ### Lists are paginated, and the totals are counted, not guessed
 
@@ -201,7 +197,7 @@ apps/agent/          FastAPI + the Strands agent
     tools/           the 12 agent tools (money.py = quote/invoice/chase)
   db/                SQL migrations, applied in order
   scripts/           seed_demo.py -- a populated workspace, no feeds needed
-  tests/             148 stdlib unittest cases, no network, no database
+  tests/             154 stdlib unittest cases, no network, no database
 
 apps/web/            Next.js 16 (App Router)
   src/app/
