@@ -26,11 +26,17 @@ export const PRIMARY_NAV: NavItem[] = [
     title: "Opportunities",
   },
   {
+    href: "/threads",
+    label: "Conversations",
+    icon: "threads",
+    title: "Conversations",
+  },
+  {
     href: "/money",
     label: "Money",
     icon: "money",
     title: "Money",
-    also: ["/deals", "/threads"],
+    also: ["/deals"],
   },
 ];
 

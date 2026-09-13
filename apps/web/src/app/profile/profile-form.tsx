@@ -325,7 +325,7 @@ export function ProfileFields({
                 />
               </Field>
 
-              <Field label="Minimum project" optional>
+              <Field label="Minimum project cost" optional>
                 <NumberField
                   value={form.min_project_budget}
                   onChange={(v) => set("min_project_budget", v)}

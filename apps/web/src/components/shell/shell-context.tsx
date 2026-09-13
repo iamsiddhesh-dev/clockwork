@@ -9,6 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { usePathname } from "next/navigation";
 import { api, type Summary } from "@/lib/api";
 import { readAccount } from "@/lib/account";
 
@@ -114,11 +115,14 @@ export function ShellProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
 
+  // Also on every page change: an approval or a run changes the badge and
+  // the spend, and waiting up to 30s for the poll made the box look stuck.
+  const pathname = usePathname();
   useEffect(() => {
     refreshSummary();
     const id = window.setInterval(refreshSummary, SUMMARY_POLL_MS);
     return () => window.clearInterval(id);
-  }, [refreshSummary]);
+  }, [refreshSummary, pathname]);
 
   const value = useMemo<ShellValue>(
     () => ({

@@ -462,7 +462,7 @@ def draft_invoice_for(quote_id: str) -> dict:
             "body": body,
         },
         rationale=(
-            f"Quote {quote_id} was accepted for {_money(quote['total'], quote['currency'])}. "
+            f"The client accepted the quote for {_money(quote['total'], quote['currency'])}. "
             f"Invoicing that amount, due {due_at.date().isoformat()} ({terms})."
         ),
         citations=[quote_id],

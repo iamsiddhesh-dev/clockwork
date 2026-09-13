@@ -28,7 +28,8 @@ export function actionVerb(actionType: string) {
  *  it rather than for an agent that doesn't exist. */
 export function workflowOf(actionType: string) {
   if (actionType === "send_pitch") return "Pitching";
-  if (actionType === "send_quote" || actionType === "send_invoice") return "Quoting";
+  if (actionType === "send_quote") return "Quoting";
+  if (actionType === "send_invoice") return "Invoicing";
   if (actionType === "send_payment_chase") return "Collections";
   return "Conversation";
 }

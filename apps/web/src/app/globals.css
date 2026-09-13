@@ -215,6 +215,23 @@ textarea::placeholder {
   }
 }
 
+/* Loading placeholders, shown the instant a page is clicked while its data
+   is fetched on the server. */
+.cw-skel {
+  border-radius: 8px;
+  background: var(--rim);
+  animation: cw-skel 1.4s ease-in-out infinite;
+}
+@keyframes cw-skel {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
 /* Every animation here is decorative. Respect the OS switch. */
 @media (prefers-reduced-motion: reduce) {
   *,

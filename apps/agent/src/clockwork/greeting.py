@@ -125,6 +125,29 @@ _SALUTATION = re.compile(
 )
 
 
+# What a model tacks on after "Hi there,": the job title or company it was
+# told not to use -- "Hi there, AI Engineer, Agent Builder. I built...".
+# Only a run of two to six capitalised words before the first full stop,
+# "!" or line end counts. A real opening sentence ("Thanks for the
+# post.", "I built...") has a lowercase word in it, and one that starts
+# with "I" is the sender talking about themselves, so both are kept.
+_ADDRESSEE = re.compile(r"^[ \t]*(?P<words>[^\n.!?]{1,60}?)[ \t]*[.!:;—–-]+[ \t]*")
+_JOINERS = {"and", "&", "of", "the", "at"}
+_SELF = re.compile(r"^I(?:'|’|$)")
+
+
+def _strip_addressee(rest: str) -> str:
+    match = _ADDRESSEE.match(rest)
+    if not match:
+        return rest
+    words = re.findall(r"[^\s,]+", match.group("words"))
+    if not 2 <= len(words) <= 6 or _SELF.match(words[0]):
+        return rest
+    if not all(w[0].isupper() or w.lower() in _JOINERS for w in words):
+        return rest
+    return rest[match.end():]
+
+
 def apply_greeting(body: str, raw_name: str | None) -> str:
     """Make the draft open with the right greeting, whatever the model wrote.
 
@@ -138,7 +161,7 @@ def apply_greeting(body: str, raw_name: str | None) -> str:
     if not match:
         return body
     line = greeting_line(raw_name)
-    rest = body[match.end():]
+    rest = _strip_addressee(body[match.end():])
     # Keep the draft's own layout: a greeting on its own line stays on its
     # own line, one that ran straight into the first sentence still does.
     separator = "" if rest.startswith("\n") or not rest else " "

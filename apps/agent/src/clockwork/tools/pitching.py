@@ -17,7 +17,7 @@ from strands import tool
 
 from ..context import current_user_id
 from ..db import get_client
-from ..evidence import evidence_text
+from ..evidence import evidence_text, strip_refs
 from ..greeting import apply_greeting, greeting_instruction
 from ..ledger import invoke_model
 from ..models import Role
@@ -127,7 +127,7 @@ def draft_pitch_for(opportunity_id: str) -> dict:
             "opportunity_url": opp.get("url"),
         },
         rationale=(
-            f"Fit score {opp.get('fit_score')}/100. {opp.get('fit_rationale') or ''}".strip()
+            f"Fit score {opp.get('fit_score')}/100. {strip_refs(opp.get('fit_rationale')) or ''}".strip()
         ),
         # An opportunity's citation is the posting itself -- there is no
         # thread to point at yet, which is exactly what makes this

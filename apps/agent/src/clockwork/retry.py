@@ -115,3 +115,34 @@ def call_with_retry(fn: Callable[[], T], *, max_attempts: int = MAX_ATTEMPTS) ->
             time.sleep(backoff)
 
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+# The orchestrator's rate-limit retry. Its prompt grows with every tool it
+# calls, so a single run can spend Groq's free 8k tokens a minute on its
+# own three or four calls in, and a 429 there used to fail the whole run
+# -- a pasted client reply went unanswered. Retrying the *whole* run is
+# unsafe (tools already ran), but retrying the one model call that was
+# refused is not: nothing has happened for it yet. Strands already does
+# exactly that through its retry hook; it just only recognises its own
+# throttle exception, and LiteLLM's 429 arrives as something else.
+ORCHESTRATOR_RETRY_ATTEMPTS = 5
+ORCHESTRATOR_RETRY_DELAY_SECONDS = 5  # then 10, 20, 40
+
+
+def orchestrator_retry_strategy():
+    """A Strands `ModelRetryStrategy` that also retries LiteLLM rate limits."""
+    from strands.agent import ModelRetryStrategy
+
+    class _RateLimitAware(ModelRetryStrategy):
+        def is_retryable(self, exception: Exception) -> bool:
+            return (
+                super().is_retryable(exception)
+                or root_rate_limit_error(exception) is not None
+                or is_tool_use_failure(exception)
+            )
+
+    return _RateLimitAware(
+        max_attempts=ORCHESTRATOR_RETRY_ATTEMPTS,
+        initial_delay=ORCHESTRATOR_RETRY_DELAY_SECONDS,
+        max_delay=60,
+    )

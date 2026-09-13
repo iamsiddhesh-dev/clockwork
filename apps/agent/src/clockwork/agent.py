@@ -18,6 +18,7 @@ from .context import run_context
 from .db import get_client
 from .ledger import record_usage, resolve_role, total_run_cost_usd
 from .models import Role, get_model
+from .retry import orchestrator_retry_strategy
 from .tools import ALL_TOOLS
 
 TriggerType = Literal["message", "schedule", "manual"]
@@ -90,6 +91,10 @@ def run_agent(trigger: Trigger) -> AgentRun:
                 tools=ALL_TOOLS,
                 system_prompt=SYSTEM_PROMPT,
                 hooks=[AuditTrail(run_id, trigger.user_id)],
+                # Retries the one refused model call on a rate limit -- see
+                # retry.orchestrator_retry_strategy for why that is safe
+                # when retrying the whole run below is not.
+                retry_strategy=orchestrator_retry_strategy(),
                 # Server-side call, not an interactive CLI session -- see
                 # ledger.invoke_model's identical note.
                 callback_handler=None,
@@ -101,8 +106,9 @@ def run_agent(trigger: Trigger) -> AgentRun:
             # re-run the whole prompt and could duplicate e.g. an approval
             # row. Retrying is only safe at the granularity of one tool's
             # own model call (see ledger.invoke_model), where nothing has
-            # happened yet by the time the model call itself fails. An
-            # uncaught 429 here just fails the run cleanly instead --
+            # happened yet by the time the model call itself fails -- which
+            # is what the retry_strategy above does for the orchestrator's
+            # own calls. A 429 that outlasts it fails the run cleanly,
             # safer than a retry that might double-send.
             result = orchestrator(trigger.prompt)
             record_usage(user_id=trigger.user_id, run_id=run_id, role=role, result=result)

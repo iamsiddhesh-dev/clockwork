@@ -245,7 +245,7 @@ def draft_reply(thread_id: str) -> dict:
         action_type="send_email",
         risk="medium",
         payload={"thread_id": thread_id, "body": body},
-        rationale=f"Drafted reply to move thread {thread_id} forward, grounded in profile + conversation history.",
+        rationale="A reply to move this conversation forward, based on your profile and everything said so far.",
         citations=citations,
         state_diff={"thread_id": thread_id, "new_outbound_message": True},
     )

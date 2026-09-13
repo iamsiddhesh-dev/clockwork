@@ -119,6 +119,19 @@ class TestApplyGreeting(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(apply_greeting(body, "Maya"), body)
 
+    def test_drops_a_job_title_tacked_on_after_the_greeting(self):
+        body = "Hi there, AI Engineer, Agent Builder. I built workflow-to-agent-converter."
+        self.assertEqual(apply_greeting(body, None), "Hi there, I built workflow-to-agent-converter.")
+
+    def test_keeps_a_real_first_sentence_after_the_greeting(self):
+        for body, expected in (
+            ("Hi there, thanks for posting. I can help.", "Hi there, thanks for posting. I can help."),
+            ("Hello, I'm Siddhesh. I build agents.", "Hi there, I'm Siddhesh. I build agents."),
+            ("Hi, Stripe Billing migration is my thing.", "Hi there, Stripe Billing migration is my thing."),
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(apply_greeting(body, None), expected)
+
     def test_does_not_treat_words_starting_with_hi_as_greetings(self):
         body = "Hiring for this role, you mentioned Postgres."
         self.assertEqual(apply_greeting(body, "Maya"), body)

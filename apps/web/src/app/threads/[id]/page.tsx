@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { Card, compactMoney } from "@/components/ui";
+import { ReplyBox } from "./reply-box";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +109,8 @@ export default async function ThreadDetailPage(props: PageProps<"/threads/[id]">
           );
         })}
       </ul>
+
+      <ReplyBox threadId={thread.id} />
     </>
   );
 }

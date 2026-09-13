@@ -1307,6 +1307,67 @@ def intake(user_id: str, req: IntakeRequest) -> dict:
     return {"thread_id": thread_id, "deal_id": deal_id, "run_id": run.id, "run_status": run.status}
 
 
+class InboundMessage(BaseModel):
+    body: str
+
+
+@app.post("/threads/{thread_id}/messages")
+def log_inbound(
+    thread_id: str, req: InboundMessage, user_id: str = Depends(get_current_user_id)
+) -> dict:
+    """Record a client's answer on an existing conversation.
+
+    Clockwork doesn't read anyone's inbox: a pitch goes out through the
+    board or the address the freelancer applied with, so the answer lands
+    there too. This is how it comes back in -- paste it, and the agent
+    wakes on it exactly as it does for an intake message: qualify the
+    lead, then draft the next reply for approval. Saved first, so a failed
+    run never loses what the client wrote.
+    """
+    body = req.body.strip()
+    if not body:
+        raise HTTPException(422, "Paste the client's message first")
+
+    client = get_client()
+    thread = (
+        client.table("thread")
+        .select("id")
+        .eq("id", thread_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not thread or not thread.data:
+        raise HTTPException(404, "thread not found")
+
+    client.table("message").insert(
+        {"thread_id": thread_id, "user_id": user_id, "direction": "inbound", "body": body}
+    ).execute()
+    client.table("thread").update({"last_message_at": "now()"}).eq("id", thread_id).execute()
+
+    deal = client.table("deal").select("id").eq("thread_id", thread_id).limit(1).execute()
+    deal_id = deal.data[0]["id"] if deal.data else None
+    deal_note = f" (deal {deal_id})" if deal_id else ""
+
+    try:
+        run = run_agent(
+            Trigger(
+                user_id=user_id,
+                trigger_type="message",
+                trigger_ref=thread_id,
+                prompt=(
+                    f"The client just replied on thread {thread_id}{deal_note}. "
+                    "Read the whole conversation, qualify the lead, and draft a reply."
+                ),
+            )
+        )
+    except Exception:
+        logger.exception("reply run failed for thread %s", thread_id)
+        return {"thread_id": thread_id, "run_id": None, "run_status": "failed"}
+
+    return {"thread_id": thread_id, "run_id": run.id, "run_status": run.status}
+
+
 # ── virtual clock ───────────────────────────────────────────────────────
 #
 # The demo unlock: every time read in the codebase goes through clock.now()

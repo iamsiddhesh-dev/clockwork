@@ -30,7 +30,7 @@ Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase
 
 Most agents are request→response. Clockwork has two ways to wake up, and both go through a single `run_agent()`:
 
-- **Event** — a lead arrives via the public intake endpoint.
+- **Event** — a lead arrives through the public intake form, or you paste a client's reply into a conversation. Either way the agent reads the thread, qualifies the lead and drafts the next message for approval.
 - **Time** — a scheduler drains due tasks and fires the agent with no human present: an in-process timer when running as a server, a scheduled call to `POST /tasks/tick` when hosted serverless.
 
 That second one is the whole point, and it's why there's a **virtual clock**: every time read in the codebase goes through `clock.now()`, so you can advance the clock several days from the UI and watch the follow-up ladder fire in seconds instead of waiting a week.
@@ -56,11 +56,11 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 | `@tool` | 12 typed tools, all of which mutate real business state |
 | `structured_output_model=` | Pydantic schemas for every extraction/scoring step — no string parsing anywhere |
 | Hooks | `BeforeToolCallEvent` / `AfterToolCallEvent` / `AfterInvocationEvent` → the `agent_event` audit trail |
-| Model abstraction | One `Role` enum (orchestrator / writer / extractor) routed to different models per job |
+| Model abstraction | One `Role` enum (orchestrator / reader / writer / extractor) routed to different models per job |
 
 ### Tests
 
-97 tests, stdlib `unittest`, no install step:
+148 tests, stdlib `unittest`, no install step:
 
 ```bash
 cd apps/agent && PYTHONPATH=src python -m unittest discover -s tests -t .
@@ -104,13 +104,14 @@ Getting paid is the half of freelancing people avoid, and it is the half where a
 
 ## The model layer
 
-One agent, three jobs, three different models — because they are not the same kind of work:
+One agent, four jobs, routed to the model that fits each — because they are not the same kind of work:
 
 | Role | Model | Why |
 |---|---|---|
 | Orchestrator | `gpt-oss-120b` | Holds a long transcript and picks the right tool |
+| Reader | `gpt-oss-120b` | Reads a GitHub profile and portfolio once at setup, on its own rate-limit budget |
 | Writer | `gpt-oss-20b` | Client-facing prose, on its own rate-limit budget so a long orchestrator run can't starve it |
-| Extractor | `gpt-oss-20b` | Cheap classification that runs dozens of times per sync |
+| Extractor | `gpt-oss-20b` | Scoring and classification that runs dozens of times per sync, at low reasoning effort to keep output short |
 
 Every call site goes through the `Role` enum, never a model id — `models.py` and `ledger.invoke_model` are the only two places a provider is named. That is what makes the daily spend cap, the degrade path and the per-run cost ledger possible at all: they key off the role, not off whatever model happens to serve it.
 
@@ -154,7 +155,7 @@ Your work is kept until you delete it. The email you onboard with is also how yo
 
 Onboarding asks for three things and reads the rest: who you are, what you charge, and where your work lives. Required fields are starred. The last step takes a **GitHub** link, a **portfolio** link, or both — and when you press *Find me work* it reads them — your best repositories and their READMEs through the public API, the site over HTTP — to fill in your summary, extra skills and the past results pitches quote. Setup then finds leads, checks their links and scores a first batch, with a progress bar that moves as each stage really finishes, and lands on the dashboard with a summary. It drafts no pitch on its own: you pick the lead. Nobody is asked to type their own case studies into a form, because nobody enjoys that and no client asks for it either.
 
-LinkedIn and CV upload are deliberately absent. LinkedIn blocks automated reading, so a LinkedIn field would collect a link the agent can never use; and a CV pasted as text is a worse copy of what GitHub and a portfolio already show. Optional refinements — years of experience, hours a week, a minimum project size — live in Settings, marked optional.
+LinkedIn and CV upload are deliberately absent. LinkedIn blocks automated reading, so a LinkedIn field would collect a link the agent can never use; and a CV pasted as text is a worse copy of what GitHub and a portfolio already show. Optional refinements — years of experience, hours a week, a minimum project cost — live in Settings, marked optional.
 
 To get a populated workspace without waiting on three job boards and a model provider:
 
@@ -200,17 +201,18 @@ apps/agent/          FastAPI + the Strands agent
     tools/           the 12 agent tools (money.py = quote/invoice/chase)
   db/                SQL migrations, applied in order
   scripts/           seed_demo.py -- a populated workspace, no feeds needed
-  tests/             76 stdlib unittest cases, no network, no database
+  tests/             148 stdlib unittest cases, no network, no database
 
 apps/web/            Next.js 16 (App Router)
   src/app/
-    onboarding/      the front door: profile → source → score → pitch
+    onboarding/      the front door: profile → read GitHub/portfolio → source → check → score
     overview/        the dashboard
     workflows/       the four stages, measured by what they produced
-    approvals/       the Approval Inbox — keyboard-driven a/r/e
+    approvals/       the Approval Inbox, plus a history of what was sent or rejected
     opportunities/   sourced leads, ranked by fit
     money/           quotes and invoices — accept, decline, mark paid, chase
-    runs/            Run Trace — live SSE replay of any agent run
+    runs/            Run Trace — live SSE replay of any agent run, including button-started work
+    threads/         conversations — paste a client's reply and the agent drafts the answer
     settings/        profile, spend cap, intake link, account, locked approval gate
     search/          cross-entity search
     signin/          the way back to a workspace whose cookie is gone
@@ -223,7 +225,7 @@ apps/web/            Next.js 16 (App Router)
 
 Stated plainly, because a demo that hides these is worth less than one that doesn't:
 
-- **Email is not wired.** Approving a message records it as sent and updates the thread; it does not transmit. Gmail's `gmail.send` is a restricted scope requiring a CASA Tier 2 audit, which is not achievable in a hackathon window, so it was deliberately deferred rather than half-built.
+- **Email is not wired.** Approving a message records it as sent and updates the thread; it does not transmit — you send it from the job board or your own email. Replies come back the same way: paste the client's answer into the conversation and the agent picks it up from there. Gmail's `gmail.send` is a restricted scope requiring a CASA Tier 2 audit, which is not achievable in a hackathon window, so it was deliberately deferred rather than half-built.
 - **No payment processor.** Marking an invoice paid is a human action. There is no Stripe integration, no card data, and nothing here can move money — taking payment is not something this agent should be able to do, and faking a processor for a demo would misrepresent where the human stays in the loop.
 - **No tax handling on quotes.** VAT and sales tax depend on both parties' jurisdictions, which is a real compliance question rather than one to guess at. `subtotal` and `total` are separate columns so adding it later needs no migration.
 - **There is no authentication.** A workspace is created by filling in the onboarding form and identified from then on by an unguessable id in a cookie. Anyone holding that id can read and write that workspace — no password, no expiry, no revocation.
@@ -231,7 +233,6 @@ Stated plainly, because a demo that hides these is worth less than one that does
   Signing in by email is weaker still, and deliberately so. The cookie was previously the *only* route back, so clearing it stranded every row in the database behind a door that no longer existed — which is indistinguishable, from the outside, from the app never having saved anything. `/signin` trades some of the UUID's unguessability for a door the owner can find again: give the email you onboarded with and you get the workspace. No password, no verification, so anyone who knows that address can do the same.
 
   Both are acceptable for a demo whose data you typed in thirty seconds ago and the wrong trade for real client correspondence. `auth.py` and the Settings screen say so plainly rather than letting the word "sign in" imply a boundary that is not there.
-- **No email is sent, so nothing here has a delivery guarantee.** See the first limit above.
 
 ## Licence
 

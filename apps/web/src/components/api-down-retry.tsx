@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { API_URL } from "@/lib/api";
+import { clearAccount, readAccount } from "@/lib/account";
 
 /** How long to wait before trying again on its own. Long enough for a cold
  *  API instance to finish booting, short enough that nobody gives up. */
@@ -21,6 +23,24 @@ export function ApiDownRetry() {
   const router = useRouter();
   const [attempts, setAttempts] = useState(0);
   const auto = attempts < MAX_AUTO_RETRIES;
+
+  // A page also fails when the cookie names a workspace that was deleted:
+  // every call is refused, and retrying forever just looks slow. Ask once
+  // whether the workspace still exists; if not, forget it and go sign in.
+  useEffect(() => {
+    const account = readAccount();
+    if (!account) return;
+    fetch(`${API_URL}/accounts/me`, { headers: { "X-Clockwork-Account": account } })
+      .then((res) => {
+        if (res.status === 401) {
+          clearAccount();
+          router.replace("/signin");
+        }
+      })
+      .catch(() => {
+        /* the API itself is unreachable: keep retrying below */
+      });
+  }, [router]);
 
   useEffect(() => {
     if (!auto) return;

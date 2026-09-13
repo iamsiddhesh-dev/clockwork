@@ -496,6 +496,13 @@ export const api = {
     apiFetch<{ thread: Thread; messages: Message[]; deal: Deal | null }>(`/threads/${id}`, account, {
       cache: "no-store",
     }),
+  /** Paste in what a client wrote back; the agent qualifies it and drafts a reply. */
+  logReply: (account: string, threadId: string, body: string) =>
+    apiFetch<{ thread_id: string; run_id: string | null; run_status: string }>(
+      `/threads/${threadId}/messages`,
+      account,
+      { method: "POST", body: JSON.stringify({ body }) },
+    ),
 
   search: (account: string, q: string) =>
     apiFetch<SearchResult>(`/search?q=${encodeURIComponent(q)}`, account, { cache: "no-store" }),

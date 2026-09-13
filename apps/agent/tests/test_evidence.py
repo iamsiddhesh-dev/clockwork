@@ -10,6 +10,7 @@ and a score with no valid citation is capped.
 import unittest
 
 from clockwork.evidence import (
+    strip_refs,
     SKILLS_ONLY_CAP,
     UNSUPPORTED_CAP,
     capped_score,
@@ -113,6 +114,17 @@ class TestEvidenceText(unittest.TestCase):
             evidence_text({"text": "Built X", "source": "GitHub", "title": "recoup"}),
             "Built X (GitHub: recoup)",
         )
+
+
+class StripRefsTest(unittest.TestCase):
+    def test_removes_index_ids_from_a_rationale(self):
+        text = "Multiple agent projects in Python (W1, W2, W5) that match. Skills [S3] fit."
+        self.assertEqual(strip_refs(text), "Multiple agent projects in Python that match. Skills fit.")
+
+    def test_leaves_ordinary_text_alone(self):
+        for text in ("Needs W3C accessibility and a 2-week start.", "", None):
+            with self.subTest(text=text):
+                self.assertEqual(strip_refs(text), text)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,31 @@ def _thread_for_quote(quote_id: str, user_id: str) -> str | None:
     return deal.data["thread_id"] if deal and deal.data else None
 
 
+def _thread_for_opportunity(opportunity_id: str, user_id: str) -> str | None:
+    """The conversation an approved pitch opened. Approving a pitch links
+    the opportunity to a deal, and the deal to its thread; a pitch that was
+    never approved has neither, because nothing went out."""
+    client = get_client()
+    opp = (
+        client.table("opportunity")
+        .select("deal_id")
+        .eq("id", opportunity_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if not opp or not opp.data or not opp.data.get("deal_id"):
+        return None
+    deal = (
+        client.table("deal")
+        .select("thread_id")
+        .eq("id", opp.data["deal_id"])
+        .maybe_single()
+        .execute()
+    )
+    return deal.data["thread_id"] if deal and deal.data else None
+
+
 def _pending_tasks() -> list[dict]:
     res = get_client().table("task").select("*").eq("status", "pending").execute()
     return res.data or []
@@ -97,6 +122,28 @@ def _run_task(task: dict) -> dict:
     client.table("task").update({"attempts": task["attempts"] + 1}).eq("id", task_id).execute()
 
     reason = (task.get("payload") or {}).get("reason", "no reason recorded")
+
+    if task["kind"] == "follow_up" and task["subject_type"] == "opportunity":
+        # A pitch's follow-up is written when the pitch is drafted, before
+        # anyone knows whether it will be approved -- and the agent has no
+        # tool that reads an opportunity, so it used to look, find no
+        # thread, and report the pitch unapproved even when it had gone
+        # out. Resolved here instead: an approved pitch becomes a thread
+        # follow-up; one that never went out has nobody to nudge, which is
+        # known without spending a model call to say so.
+        thread_id = _thread_for_opportunity(task["subject_id"], task["user_id"])
+        if thread_id is None:
+            client.table("task").update({"status": "done"}).eq("id", task_id).execute()
+            return {
+                "task_id": task_id,
+                "kind": task["kind"],
+                "subject_type": task["subject_type"],
+                "subject_id": task["subject_id"],
+                "run_id": None,
+                "run_status": "skipped",
+                "outcome": "The pitch was never approved, so nothing went out and there is nobody to follow up with.",
+            }
+        task = {**task, "subject_type": "thread", "subject_id": thread_id}
 
     if task["kind"] == "follow_up" and task["subject_type"] == "thread":
         # Deliberately not "decide whether the client replied" as an open

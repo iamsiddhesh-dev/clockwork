@@ -169,3 +169,21 @@ def evidence_text(item: str | dict) -> str:
         where = f"{item.get('source')}: {item.get('title')}" if item.get("title") else item.get("source")
         return f"{item.get('text')} ({where})" if where else str(item.get("text"))
     return str(item)
+
+
+# "(W1, W2, W5)", "[S3]", "W4" -- the index ids are for the scorer and for
+# verify_evidence, not for the person reading the rationale, who has the
+# linked evidence lines right underneath it.
+_PROSE_REFS = re.compile(
+    r"\s*[\(\[]\s*[WS]\d{1,3}(?:\s*[,/&]\s*(?:and\s+)?[WS]\d{1,3})*\s*[\)\]]"
+    r"|\b[WS]\d{1,3}\b(?:\s*,\s*[WS]\d{1,3})*",
+)
+
+
+def strip_refs(text: str | None) -> str | None:
+    """Remove evidence-index ids from free text such as a fit rationale."""
+    if not text:
+        return text
+    cleaned = _PROSE_REFS.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return re.sub(r"\s+([.,;:])", r"\1", cleaned).strip()

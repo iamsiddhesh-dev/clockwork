@@ -162,24 +162,25 @@ def resolve_account(account_id: str) -> str:
     if not account_id or not _valid_uuid(account_id):
         raise HTTPException(401, "Missing or malformed account id")
 
+    # One round trip, not two. This runs before every request the app
+    # makes, and it used to read the account and then write last_seen_at
+    # as a second query -- two trips to the database before a page could
+    # start on its own work. An update that returns the row it touched
+    # answers "does this workspace exist" and records the visit at once.
     res = (
         get_client()
         .table("account")
-        .select("id")
+        .update({"last_seen_at": "now()"})
         .eq("id", account_id)
-        .maybe_single()
         .execute()
     )
-    if not res or not res.data:
+    rows = res.data or []
+    if not rows:
         # A cookie pointing at a workspace that no longer exists. 401 so
-        # the frontend clears it and sends the visitor back to onboarding
+        # the frontend clears it and sends the visitor back to set up
         # rather than showing empty screens forever.
         raise HTTPException(401, "Unknown workspace")
-
-    get_client().table("account").update({"last_seen_at": "now()"}).eq(
-        "id", account_id
-    ).execute()
-    return str(res.data["id"])
+    return str(rows[0]["id"])
 
 
 def get_current_user_id(

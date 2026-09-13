@@ -61,6 +61,20 @@ function untilLabel(nowIso: string, dueIso: string): string {
   return `in ${Math.round(hours / 24)}d`;
 }
 
+const TASK_LABELS: Record<string, string> = {
+  follow_up: "Follow-up",
+  quote_chase: "Quote check-in",
+  invoice_chase: "Payment reminder",
+};
+
+/** Model calls here cost fractions of a cent, so two decimals read "$0.00"
+ *  and looked like nothing was being counted. */
+function usd(amount: number): string {
+  if (amount === 0) return "$0";
+  if (amount < 0.01) return `$${amount.toFixed(4)}`;
+  return `$${amount.toFixed(2)}`;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const { summary } = useShell();
@@ -134,10 +148,10 @@ export function Sidebar() {
           {summary ? (
             <>
               {summary.next_task
-                ? `Next wake ${untilLabel(summary.now, summary.next_task.due_at)}`
+                ? `${TASK_LABELS[summary.next_task.kind] ?? "Next task"} ${untilLabel(summary.now, summary.next_task.due_at)}`
                 : "Nothing scheduled"}
               <br />
-              Spend ${summary.spent_today_usd.toFixed(2)} / ${summary.daily_cap_usd.toFixed(2)}
+              AI cost today {usd(summary.spent_today_usd)} of {usd(summary.daily_cap_usd)}
             </>
           ) : (
             "—"

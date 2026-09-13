@@ -17,7 +17,7 @@ from strands import tool
 
 from ..context import current_user_id
 from ..db import get_client
-from ..evidence import capped_score, evidence_index, render_index, verify_evidence
+from ..evidence import capped_score, evidence_index, render_index, strip_refs, verify_evidence
 from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import FitScore
@@ -155,7 +155,7 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
     client.table("opportunity").update(
         {
             "fit_score": score,
-            "fit_rationale": fit.rationale,
+            "fit_rationale": strip_refs(fit.rationale),
             "fit_evidence": {"evidence": evidence, "concerns": concerns},
             "status": "scored",
             "updated_at": "now()",
