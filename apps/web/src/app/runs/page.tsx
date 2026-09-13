@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, triggerLabel } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
@@ -69,14 +69,8 @@ export default async function RunsPage({ searchParams }: PageProps<"/runs">) {
               }}
             >
               <div className="cw-row" style={{ gap: 10 }}>
-                <span
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {run.trigger_type} trigger
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                  {triggerLabel(run.trigger_type)}
                 </span>
                 <span
                   className="cw-mono"

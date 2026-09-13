@@ -146,6 +146,9 @@ export type Opportunity = {
   link_note: string | null;
   link_final_url: string | null;
   deal_id: string | null;
+  /** The deal this posting became, once its pitch was approved -- carries
+   *  the conversation to link to. */
+  deal?: { thread_id: string; stage: string } | null;
   created_at: string;
   updated_at: string;
 };
@@ -182,6 +185,8 @@ export type SyncReport = {
 };
 
 export type KickoffResult = {
+  /** The run that recorded all of it, for "See every step". */
+  run_id?: string;
   sourced: SyncReport;
   links: LinkCheckReport;
   scored: { scored: number; failed: number };
@@ -428,7 +433,8 @@ async function apiPage<T>(
 }
 
 export const api = {
-  listApprovals: (account: string, status = "pending") =>
+  /** `status: "decided"` is the history: sent, rejected or failed. */
+  listApprovals: (account: string, status: "pending" | "decided" = "pending") =>
     apiFetch<Approval[]>(`/approvals?status=${status}`, account, { cache: "no-store" }),
   approve: (account: string, id: string) =>
     apiFetch<{ status: string }>(`/approvals/${id}/approve`, account, { method: "POST" }),

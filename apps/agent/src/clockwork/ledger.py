@@ -7,13 +7,14 @@ strands-agents 1.52.0: `AgentResult.metrics.accumulated_usage` is a
 `Usage` TypedDict with `inputTokens` / `outputTokens` / `totalTokens`.
 """
 
+import time
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from strands import Agent
 from strands.agent.agent_result import AgentResult
 
-from .context import current_run_id, current_user_id
+from .context import current_run_id, current_user_id, next_event_seq
 from .db import get_client
 from .models import Role, get_model, pricing_per_million
 from .retry import call_with_retry
@@ -185,12 +186,37 @@ def invoke_model(
     # cp1252 during Groq smoke-testing, Aug 18).
     agent = Agent(model=model, system_prompt=system_prompt, callback_handler=None)
 
+    started = time.monotonic()
     result = call_with_retry(
         lambda: agent(prompt, structured_output_model=structured_output_model)
     )
+    latency_ms = int((time.monotonic() - started) * 1000)
     # Record usage before validating: the tokens were spent whether or not
     # the model gave us something usable, and the ledger should say so.
-    record_usage(user_id=user_id, run_id=run_id, role=resolved_role, result=result)
+    cost = record_usage(user_id=user_id, run_id=run_id, role=resolved_role, result=result)
+
+    # Inside a run someone started with a button, put the call in the
+    # trace. The orchestrator's hooks cover the runs it drives; nothing
+    # covered these, which is why a whole onboarding -- twenty-odd model
+    # calls -- used to leave the Run Trace empty.
+    seq = next_event_seq()
+    if run_id and seq is not None:
+        from .audit import log_event
+        from .models import current_model_id
+
+        usage = result.metrics.accumulated_usage
+        log_event(
+            run_id=run_id,
+            user_id=user_id,
+            seq=seq,
+            kind="model_call",
+            tool_name=structured_output_model.__name__ if structured_output_model else None,
+            rationale=f"{resolved_role.value} model · {current_model_id(resolved_role)}",
+            latency_ms=latency_ms,
+            input_tokens=int(usage.get("inputTokens", 0)),
+            output_tokens=int(usage.get("outputTokens", 0)),
+            cost_usd=cost,
+        )
 
     if structured_output_model is not None:
         result.structured_output = _validated_structured_output(

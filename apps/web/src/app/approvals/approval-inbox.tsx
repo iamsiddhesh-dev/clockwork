@@ -1,55 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api, type Approval } from "@/lib/api";
 import { readAccount } from "@/lib/account";
 import { Empty } from "@/components/ui";
+import { actionVerb, subjectOf, workflowOf } from "./labels";
 
 const POLL_MS = 5000;
-
-function actionVerb(actionType: string) {
-  switch (actionType) {
-    case "send_email":
-      return "Send this reply";
-    case "send_pitch":
-      return "Send this pitch";
-    case "send_quote":
-      return "Send this quote";
-    case "send_invoice":
-      return "Send this invoice";
-    case "send_payment_chase":
-      return "Send this payment reminder";
-    default:
-      return `Run ${actionType}`;
-  }
-}
-
-/** Which stage of the spine queued this, named for the tool that wrote
- *  it rather than for an agent that doesn't exist. */
-function workflowOf(actionType: string) {
-  if (actionType === "send_pitch") return "Pitching";
-  if (actionType === "send_quote" || actionType === "send_invoice") return "Quoting";
-  if (actionType === "send_payment_chase") return "Collections";
-  return "Conversation";
-}
-
-/** The one line naming who this is about, read off whatever the payload
- *  actually carries for that action type. */
-function subjectOf(approval: Approval): string | null {
-  const payload = approval.payload as Record<string, unknown>;
-  const diff = approval.state_diff as Record<string, unknown>;
-  if (typeof payload.opportunity_title === "string") return payload.opportunity_title;
-  if (typeof diff.invoice === "string")
-    return `Invoice ${diff.invoice}${diff.days_overdue ? ` · ${diff.days_overdue} days overdue` : ""}`;
-  if (typeof diff.total === "string") return String(diff.total);
-  return null;
-}
 
 function timeOf(iso: string) {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
 
 export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval[] }) {
+  const router = useRouter();
   const [approvals, setApprovals] = useState<Approval[]>(initialApprovals);
   const [selected, setSelected] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -95,6 +60,10 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
         await (verb === "approve"
           ? api.approve(account, approval.id)
           : api.reject(account, approval.id));
+        // The decided list below is server-rendered, so it only learns
+        // about this decision on a refresh. Without one, approving made
+        // the card vanish with nowhere on screen saying what became of it.
+        router.refresh();
       } catch (err) {
         setApprovals((prev) => [approval, ...prev]);
         setError(`Couldn't ${verb}: ${(err as Error).message}`);
@@ -102,7 +71,7 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
         setBusyId(null);
       }
     },
-    [],
+    [router],
   );
 
   const startEdit = (approval: Approval) => {

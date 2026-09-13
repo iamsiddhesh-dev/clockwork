@@ -94,6 +94,7 @@ from .auth import (
 )
 from .config import parse_origins, settings
 from .context import run_context
+from .runs import manual_run
 from .db import get_client
 from .executor import execute_approval
 from .importer import import_profile
@@ -447,13 +448,18 @@ def post_profile_import(
     profile suggestion. Saves nothing -- the caller shows the result back
     for confirmation first. See importer.py for what is and is not
     actually fetchable."""
-    with run_context(user_id=user_id, run_id=None):
-        return import_profile(
+    with manual_run(user_id, label="Read GitHub and portfolio") as run:
+        result = import_profile(
             github=req.github,
             website=req.website,
             linkedin=req.linkedin,
             resume_text=req.resume_text,
         )
+        found = len((result.get("profile") or {}).get("highlights") or [])
+        read = ", ".join(result.get("read") or []) or "nothing readable"
+        run.outcome = f"Read {read} · {found} past result{'' if found == 1 else 's'} found"
+        run.step(run.outcome, tool="import_profile", payload={"skipped": result.get("skipped")})
+        return result
 
 
 @app.get("/profile")
@@ -526,7 +532,15 @@ def list_opportunities(
     the query for page two -- so a row can appear twice and another never
     appear at all.
     """
-    query = get_client().table("opportunity").select("*", count="exact").eq("user_id", user_id)
+    # The deal's thread rides along, so a posting that became a real
+    # conversation can link straight to it instead of showing a dead
+    # "Draft a pitch" button.
+    query = (
+        get_client()
+        .table("opportunity")
+        .select("*, deal:deal_id(thread_id, stage)", count="exact")
+        .eq("user_id", user_id)
+    )
     if status:
         query = query.eq("status", status)
     elif not include_dismissed:
@@ -598,11 +612,14 @@ def score_opportunities(
 ) -> dict:
     """Score a batch of unscored opportunities against the caller's
     profile. Batched on purpose -- see score_unscored's docstring."""
-    with run_context(user_id=user_id, run_id=None):
+    with manual_run(user_id, label="Score opportunities") as run:
         try:
-            return score_unscored(limit=req.limit)
+            result = score_unscored(limit=req.limit)
         except ProfileMissingError as exc:
             raise HTTPException(400, str(exc)) from exc
+        run.outcome = _scored_line(result)
+        run.step(run.outcome, tool="score_fit")
+        return result
 
 
 class VerifyRequest(BaseModel):
@@ -627,11 +644,57 @@ def pitch_opportunity(
 ) -> dict:
     """Draft outbound outreach for one opportunity. Queues an approval --
     nothing is sent here."""
-    with run_context(user_id=user_id, run_id=None):
+    with manual_run(user_id, label="Draft a pitch", trigger_ref=opportunity_id) as run:
         try:
-            return draft_pitch_for(opportunity_id)
+            result = draft_pitch_for(opportunity_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        run.outcome = f"Drafted a pitch for {_opportunity_title(opportunity_id)} — waiting for your approval, nothing sent"
+        run.step(run.outcome, tool="draft_pitch", payload={"approval_id": result.get("approval_id")})
+        return result
+
+
+# ── run narration ───────────────────────────────────────────────────────
+#
+# One line per step, for the Run Trace and the Runs list. Written as what
+# happened, not as function names -- the trace is read by the person whose
+# work it is, and by judges who have never seen the code.
+
+ACTION_VERBS = {
+    "send_email": "Send a reply",
+    "send_pitch": "Send a pitch",
+    "send_quote": "Send a quote",
+    "send_invoice": "Send an invoice",
+    "send_payment_chase": "Send a payment reminder",
+}
+
+
+def _scored_line(result: dict) -> str:
+    failed = result.get("failed", 0)
+    return f"Scored {result.get('scored', 0)} against your profile" + (
+        f", {failed} failed (usually a rate limit)" if failed else ""
+    )
+
+
+def _opportunity_title(opportunity_id: str) -> str:
+    row = (
+        get_client().table("opportunity").select("title").eq("id", opportunity_id).maybe_single().execute()
+    )
+    title = (row.data or {}).get("title") if row else None
+    return f"“{title[:80]}”" if title else "this posting"
+
+
+def _executed_line(action_type: str, result: dict) -> str:
+    """What approving actually changed, in plain words."""
+    if result.get("skipped"):
+        return str(result.get("reason") or "skipped, nothing sent")
+    return {
+        "send_pitch": "conversation opened, deal created, follow-up in 4 days",
+        "send_email": "reply recorded on the thread, follow-up scheduled",
+        "send_quote": "quote marked sent, deal moved to quoted, check-in in 5 days",
+        "send_invoice": "invoice marked sent, payment check scheduled for after it is due",
+        "send_payment_chase": "reminder recorded, next check in 7 days",
+    }.get(action_type, "done")
 
 
 class KickoffRequest(BaseModel):
@@ -667,8 +730,13 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
         logger.exception("kickoff stage %r failed for %s", stage, user_id)
         errors[stage] = f"{type(exc).__name__}: {exc}"[:300]
 
-    with run_context(user_id=user_id, run_id=None):
+    with manual_run(user_id, label="Onboarding: find, check, score and pitch") as run:
         sync = sync_sources(user_id)
+        per_source = " · ".join(
+            f"{s['kind']} {s.get('fetched', 0)}" if s.get("ok") else f"{s['kind']} failed"
+            for s in sync.get("sources", [])
+        )
+        run.step(f"Sourced {sync.get('total', 0)} postings ({per_source})", tool="sync_sources")
 
         # Check the links before spending model calls on them. Scoring a
         # posting that was filled last month costs real tokens to produce
@@ -678,6 +746,12 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
         except Exception as exc:
             failed("links", exc)
             links = {"checked": 0, "live": 0, "closed": 0, "gone": 0, "unreachable": 0, "skipped": 0}
+        dead = links.get("gone", 0) + links.get("closed", 0)
+        run.step(
+            f"Checked {links.get('checked', 0)} links — {links.get('live', 0)} live"
+            + (f", {dead} no longer open and excluded" if dead else ""),
+            tool="verify_links",
+        )
 
         try:
             scoring = score_unscored(limit=req.score_limit)
@@ -686,6 +760,7 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
         except Exception as exc:
             failed("scoring", exc)
             scoring = {"scored": 0, "failed": 0}
+        run.step(_scored_line(scoring), tool="score_fit")
 
         # Pitch only genuinely good matches. Drafting outreach for a
         # 20/100 lead would be the exact generic spam this is supposed to
@@ -711,10 +786,27 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
         for row in best:
             try:
                 pitched.append(draft_pitch_for(row["id"]))
+                run.step(
+                    f"Drafted a pitch for {_opportunity_title(row['id'])} (fit {row['fit_score']}) "
+                    "— waiting for your approval, nothing sent",
+                    tool="draft_pitch",
+                )
             except Exception as exc:
                 pitch_errors.append({"opportunity_id": row["id"], "error": str(exc)[:200]})
+        if not best:
+            run.step(
+                "No lead scored 60 or more, so no pitch was drafted — writing to a weak match is spam",
+                tool="draft_pitch",
+            )
+
+        run.outcome = (
+            f"Sourced {sync.get('total', 0)}, checked {links.get('checked', 0)}, "
+            f"scored {scoring['scored']}, pitched {len(pitched)}"
+        )
+        run_id = run.id
 
     return {
+        "run_id": run_id,
         "sourced": sync,
         "links": links,
         "scored": {"scored": scoring["scored"], "failed": scoring["failed"]},
@@ -801,11 +893,17 @@ def list_deals(
 @app.post("/deals/{deal_id}/quote")
 def quote_deal(deal_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     """Price one deal. Queues a send_quote approval -- nothing is sent."""
-    with run_context(user_id=user_id, run_id=None):
+    with manual_run(user_id, label="Draft a quote", trigger_ref=deal_id) as run:
         try:
-            return draft_quote_for(deal_id)
+            result = draft_quote_for(deal_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        run.outcome = (
+            f"Priced the deal at {result.get('currency', '')} {result.get('total')} "
+            "— quote waiting for your approval"
+        )
+        run.step(run.outcome, tool="draft_quote", payload={"approval_id": result.get("approval_id")})
+        return result
 
 
 # ── money ───────────────────────────────────────────────────────────────
@@ -890,11 +988,14 @@ def decline_quote(quote_id: str, user_id: str = Depends(get_current_user_id)) ->
 def invoice_quote(quote_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     """Raise an invoice against an accepted quote. Queues a send_invoice
     approval -- nothing is sent."""
-    with run_context(user_id=user_id, run_id=None):
+    with manual_run(user_id, label="Raise an invoice", trigger_ref=quote_id) as run:
         try:
-            return draft_invoice_for(quote_id)
+            result = draft_invoice_for(quote_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        run.outcome = f"Raised invoice {result.get('number')} — waiting for your approval"
+        run.step(run.outcome, tool="draft_invoice", payload={"approval_id": result.get("approval_id")})
+        return result
 
 
 @app.get("/invoices")
@@ -974,28 +1075,42 @@ def mark_invoice_paid(invoice_id: str, user_id: str = Depends(get_current_user_i
 def chase_invoice(invoice_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     """Draft the next payment reminder now, rather than waiting for the
     scheduled check. Returns action "none" if there is nothing to chase."""
-    with run_context(user_id=user_id, run_id=None):
+    with manual_run(user_id, label="Chase a payment", trigger_ref=invoice_id) as run:
         try:
-            return chase_payment_for(invoice_id)
+            result = chase_payment_for(invoice_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        if result.get("action") == "chase_drafted":
+            run.outcome = (
+                f"Drafted a payment reminder ({result.get('days_overdue')} days overdue) "
+                "— waiting for your approval"
+            )
+        else:
+            run.outcome = f"Nothing to chase: {result.get('reason')}"
+        run.step(run.outcome, tool="chase_payment")
+        return result
 
 
 # ── approvals ───────────────────────────────────────────────────────────
 
 
+#: Every state an approval can end in. `approved` is included because it is
+#: the brief moment between the click and the executor finishing -- a card
+#: must never vanish from both lists at once.
+DECIDED_STATUSES = ["approved", "executed", "rejected", "failed"]
+
+
 @app.get("/approvals")
 def list_approvals(status: str = "pending", user_id: str = Depends(get_current_user_id)) -> list[dict]:
-    res = (
-        get_client()
-        .table("approval")
-        .select("*")
-        .eq("status", status)
-        .eq("user_id", user_id)
-        .order("created_at")
-        .execute()
-    )
-    return res.data or []
+    """`status=decided` returns the history -- everything already approved,
+    sent, rejected or failed, newest decision first. Without it, approving
+    a card made it disappear with nowhere to see what had happened to it."""
+    query = get_client().table("approval").select("*").eq("user_id", user_id)
+    if status == "decided":
+        query = query.in_("status", DECIDED_STATUSES).order("decided_at", desc=True, nullsfirst=False).limit(30)
+    else:
+        query = query.eq("status", status).order("created_at")
+    return query.execute().data or []
 
 
 class EditApprovalRequest(BaseModel):
@@ -1042,16 +1157,23 @@ def edit_approval(
 @app.post("/approvals/{approval_id}/approve")
 def approve(approval_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     client = get_client()
-    _owned_pending_approval(client, approval_id, user_id)
+    approval = _owned_pending_approval(client, approval_id, user_id)
+    verb = ACTION_VERBS.get(approval["action_type"], approval["action_type"])
 
     client.table("approval").update(
         {"status": "approved", "decided_at": "now()"}
     ).eq("id", approval_id).execute()
 
-    try:
-        result = execute_approval(approval_id)
-    except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+    # A run of its own, so the decision shows up in Runs and on the
+    # Overview -- approving used to change the database and leave no trace
+    # anywhere a person would look.
+    with manual_run(user_id, label=f"You approved: {verb}", trigger_ref=approval_id) as run:
+        try:
+            result = execute_approval(approval_id)
+        except Exception as exc:
+            raise HTTPException(500, str(exc)) from exc
+        run.outcome = f"You approved: {verb} — {_executed_line(approval['action_type'], result)}"
+        run.step(run.outcome, tool=approval["action_type"], payload={"result": result})
 
     return {"status": "executed", "result": result}
 
@@ -1059,11 +1181,16 @@ def approve(approval_id: str, user_id: str = Depends(get_current_user_id)) -> di
 @app.post("/approvals/{approval_id}/reject")
 def reject(approval_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
     client = get_client()
-    _owned_pending_approval(client, approval_id, user_id)
+    approval = _owned_pending_approval(client, approval_id, user_id)
+    verb = ACTION_VERBS.get(approval["action_type"], approval["action_type"])
 
     client.table("approval").update(
         {"status": "rejected", "decided_at": "now()"}
     ).eq("id", approval_id).execute()
+
+    with manual_run(user_id, label=f"You rejected: {verb}", trigger_ref=approval_id) as run:
+        run.outcome = f"You rejected: {verb} — nothing was sent"
+        run.step(run.outcome, tool=approval["action_type"])
     return {"status": "rejected"}
 
 

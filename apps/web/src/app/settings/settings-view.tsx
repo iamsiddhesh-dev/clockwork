@@ -152,7 +152,7 @@ export function SettingsView({
             blurb="How often it wakes up on its own."
           >
             <span className="cw-mono" style={{ fontSize: 14, fontWeight: 500 }}>
-              every 30s
+              every 5 min
             </span>
           </Row>
 

@@ -7,11 +7,36 @@ Contextvars rather than globals so concurrent runs (different users, or
 the scheduler firing many runs at once) never bleed into each other.
 """
 
+import itertools
 from contextlib import contextmanager
 from contextvars import ContextVar
 
 _user_id: ContextVar[str | None] = ContextVar("clockwork_user_id", default=None)
 _run_id: ContextVar[str | None] = ContextVar("clockwork_run_id", default=None)
+
+# Event numbering for runs a person starts with a button (see runs.py).
+# The orchestrator's own AuditTrail hook numbers its events itself; this
+# is only set inside `manual_run`, which is also how the ledger knows to
+# write a model_call event into the trace -- nothing else would.
+_event_seq: ContextVar["itertools.count[int] | None"] = ContextVar(
+    "clockwork_event_seq", default=None
+)
+
+
+@contextmanager
+def event_sequence():
+    """Number the events written inside this block 1, 2, 3, ..."""
+    token = _event_seq.set(itertools.count(1))
+    try:
+        yield
+    finally:
+        _event_seq.reset(token)
+
+
+def next_event_seq() -> int | None:
+    """The next event number, or None when not inside a manual run."""
+    counter = _event_seq.get()
+    return next(counter) if counter is not None else None
 
 
 @contextmanager

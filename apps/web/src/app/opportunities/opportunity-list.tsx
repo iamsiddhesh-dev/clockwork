@@ -52,7 +52,7 @@ const STATUS_LABEL: Record<Opportunity["status"], string> = {
   scored: "scored",
   pitched: "pitch drafted",
   dismissed: "dismissed",
-  converted: "became a deal",
+  converted: "pitch sent",
 };
 
 export function OpportunityList({
@@ -388,7 +388,24 @@ export function OpportunityList({
                     </details>
 
                     <div className="cw-row" style={{ gap: 9, marginTop: 20 }}>
-                      {opportunity.status === "pitched" ? (
+                      {opportunity.status === "converted" ? (
+                        // Approved and sent. Offering "Draft a pitch" here,
+                        // even disabled, read as though the approval had
+                        // been lost.
+                        <>
+                          <span className="cw-status" style={{ color: "var(--ok)", alignSelf: "center" }}>
+                            Pitch sent
+                          </span>
+                          {opportunity.deal?.thread_id && (
+                            <Link
+                              href={`/threads/${opportunity.deal.thread_id}`}
+                              className="cw-btn cw-btn-sm cw-btn-primary"
+                            >
+                              Open conversation
+                            </Link>
+                          )}
+                        </>
+                      ) : opportunity.status === "pitched" ? (
                         <Link href="/approvals" className="cw-btn cw-btn-sm cw-btn-primary">
                           Pitch waiting for you
                         </Link>

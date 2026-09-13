@@ -22,3 +22,18 @@ export function formatDate(iso: string): string {
 export function formatNumber(n: number): string {
   return n.toLocaleString(LOCALE);
 }
+
+/** What woke a run, said the way a person would. "manual trigger" was
+ *  the column value leaking straight onto the screen. */
+export function triggerLabel(triggerType: string): string {
+  switch (triggerType) {
+    case "manual":
+      return "Started by you";
+    case "schedule":
+      return "Woke up on schedule";
+    case "message":
+      return "A client wrote in";
+    default:
+      return triggerType;
+  }
+}

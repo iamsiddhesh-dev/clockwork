@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, PageHead } from "@/components/ui";
 import { ApprovalInbox } from "./approval-inbox";
+import { ApprovalHistory } from "./approval-history";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,12 @@ export const metadata = { title: "Approvals" };
 
 export default async function ApprovalsPage() {
   const account = await requireAccount();
-  const approvals = await api.listApprovals(account).catch(() => null);
+  const [approvals, decided] = await Promise.all([
+    api.listApprovals(account).catch(() => null),
+    // Decoration, not the point of the page: if history can't load, the
+    // inbox still must.
+    api.listApprovals(account, "decided").catch(() => []),
+  ]);
   if (!approvals) return <ApiDown what="The approval inbox" />;
 
   return (
@@ -22,13 +28,9 @@ export default async function ApprovalsPage() {
             ? "Nothing waiting on you"
             : `${approvals.length} client-facing action${approvals.length === 1 ? "" : "s"}`
         }
-        aside={
-          <p className="cw-mono" style={{ margin: 0, fontSize: 11, color: "var(--quiet)" }}>
-            j / k move · a approve · r reject · e edit
-          </p>
-        }
       />
       <ApprovalInbox initialApprovals={approvals} />
+      <ApprovalHistory decided={decided} />
     </>
   );
 }

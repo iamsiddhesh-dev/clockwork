@@ -289,6 +289,11 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
         >
           Dashboard
         </button>
+        {result?.run_id && (
+          <button className="cw-btn cw-btn-quiet" onClick={() => router.push(`/runs/${result.run_id}`)}>
+            See every step
+          </button>
+        )}
       </div>
     </Frame>
   );

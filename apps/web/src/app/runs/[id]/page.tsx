@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, triggerLabel } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { Card } from "@/components/ui";
 import { RunTrace } from "./run-trace";
@@ -23,12 +23,9 @@ export default async function RunDetailPage(props: PageProps<"/runs/[id]">) {
         <Link href="/runs" className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)" }}>
           ← All runs
         </Link>
-        <h1 className="cw-h1" style={{ textTransform: "capitalize" }}>
-          {run.trigger_type} trigger
-        </h1>
+        <h1 className="cw-h1">{triggerLabel(run.trigger_type)}</h1>
         <p className="cw-mono" style={{ margin: "14px 0 0", fontSize: 11, color: "var(--quiet)" }}>
           {formatDateTime(run.started_at)} · ${Number(run.total_cost_usd ?? 0).toFixed(4)}
-          {run.trigger_ref ? ` · ref ${run.trigger_ref}` : ""}
         </p>
       </header>
 
