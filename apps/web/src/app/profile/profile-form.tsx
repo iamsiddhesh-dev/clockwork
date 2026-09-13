@@ -180,13 +180,11 @@ export function ProfileFields({
   form,
   setForm,
   only,
-  showErrors,
   variant = "settings",
 }: {
   form: ProfileDraft;
   setForm: (next: ProfileDraft) => void;
   only?: StepKey;
-  showErrors?: boolean;
   /** Onboarding asks for what the agent cannot work without. Everything
    *  that only sharpens the results lives in Settings, marked optional. */
   variant?: "onboarding" | "settings";
@@ -333,7 +331,7 @@ export function ProfileFields({
       )}
 
       {show("proof") && (
-        <ProofFields form={form} setForm={setForm} showErrors={showErrors} canRead={inSettings} />
+        <ProofFields form={form} setForm={setForm} canRead={inSettings} />
       )}
     </div>
   );
@@ -341,15 +339,18 @@ export function ProfileFields({
 
 // ── step 3: where their work lives ────────────────────────────────────
 
+/**
+ * No inline error here on purpose: onboarding and Settings both already
+ * show the step's error beside their own button, and the same sentence
+ * twice on one screen reads as two separate problems.
+ */
 function ProofFields({
   form,
   setForm,
-  showErrors,
   canRead,
 }: {
   form: ProfileDraft;
   setForm: (next: ProfileDraft) => void;
-  showErrors?: boolean;
   /** Settings offers a "read again" button. Onboarding doesn't need one:
    *  it reads the links itself when the person presses Find me work. */
   canRead: boolean;
@@ -363,7 +364,6 @@ function ProofFields({
 
   const githubId = useFieldId("github");
   const websiteId = useFieldId("website");
-  const error = showErrors ? stepErrors(form).proof : null;
 
   async function readAgain() {
     setBusy(true);
@@ -402,8 +402,6 @@ function ProofFields({
           autoComplete="url"
         />
       </Field>
-
-      {error && <p style={{ margin: 0, fontSize: 12.5, color: "var(--bad)" }}>{error}</p>}
 
       {canRead && (
         <div className="cw-row">
@@ -499,7 +497,7 @@ export function ProfileForm({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <CompletenessBar form={form} />
-      <ProfileFields form={form} setForm={setForm} showErrors />
+      <ProfileFields form={form} setForm={setForm} />
 
       <div className="cw-row">
         <button className="cw-btn cw-btn-primary" onClick={save} disabled={status === "saving"}>

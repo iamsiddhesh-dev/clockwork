@@ -129,7 +129,6 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
             form={form}
             setForm={setForm}
             only={step.key}
-            showErrors={touched}
             variant="onboarding"
           />
         </div>
