@@ -173,10 +173,17 @@ try {
   document.documentElement.dataset.ambient = 'on';
 }
 try {
+  // Only on a fresh arrival at onboarding, which is the one page that
+  // renders the intro -- and so the one page that can switch it back off.
+  // This used to fire on whatever page loaded first, so opening the app at
+  // /settings set the flag with nothing on screen to clear it. It then sat
+  // there all session until deleting an account navigated into onboarding,
+  // where it replayed a five-second intro over a form held invisible.
+  var onboarding = location.pathname.indexOf('/onboarding') === 0;
   var reduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var seen = sessionStorage.getItem('${PRELOAD_KEY}') === '1';
-  if (!reduced && !seen) {
+  if (onboarding && !reduced && !seen) {
     document.documentElement.dataset.preload = 'on';
     sessionStorage.setItem('${PRELOAD_KEY}', '1');
   }

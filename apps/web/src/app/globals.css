@@ -39,6 +39,9 @@
   --grain: 0.13;
   --wash: 0.55;
 
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --scroll-thumb-hi: rgba(255, 255, 255, 0.28);
+
   --l-warm: rgba(255, 122, 24, 0.5);
   --l-cool: rgba(77, 163, 255, 0.46);
   --l-white: rgba(255, 255, 255, 0.24);
@@ -81,6 +84,9 @@
   --grain: 0.05;
   --wash: 0.3;
 
+  --scroll-thumb: rgba(0, 0, 0, 0.17);
+  --scroll-thumb-hi: rgba(0, 0, 0, 0.32);
+
   --l-warm: rgba(255, 122, 24, 0.18);
   --l-cool: rgba(23, 95, 184, 0.16);
   --l-white: rgba(255, 255, 255, 0.55);
@@ -116,6 +122,47 @@ body {
   color: var(--ink);
   font-family: var(--font-figtree), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* ── scrollbars ──────────────────────────────────────────────────────
+   The platform default is a solid grey slab -- on Windows especially --
+   and now that the main column and the sidebar each scroll on their own,
+   there are two of them in view at all times. So: no track, just a
+   translucent pill floating over the glass, drawn from the theme tokens
+   so it inverts with everything else and brightens when you reach for it.
+
+   The `border` plus `background-clip: padding-box` is what makes the pill
+   narrower than the gutter it sits in, leaving breathing room at the edge
+   instead of a bar glued to the card border. */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  transition: background-color var(--t);
+}
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scroll-thumb-hi);
+}
+
+/* Firefox only. Fenced off on purpose: in Chromium 121+, setting the
+   standard `scrollbar-color` on an element makes it ignore every
+   ::-webkit-scrollbar rule above, so applying these everywhere would
+   quietly replace Chrome's rounded pill with a plain square bar. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) transparent;
+  }
 }
 
 a {
@@ -438,6 +485,17 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Every section keeps its natural height; the column scrolls instead.
+   Flex items default to `flex-shrink: 1`, which was harmless while the
+   document scrolled and the column could grow without limit. Once the
+   shell was pinned to the window, the column got a fixed height and began
+   squeezing its children to fit it -- the Overview hero was drawn 80px
+   tall around 336px of content, and its `overflow: hidden` clipped the
+   rest. A scrolling flex column wants children that refuse to shrink. */
+.cw-main > * {
+  flex-shrink: 0;
 }
 
 .cw-only-narrow {

@@ -43,28 +43,39 @@ export function Preloader() {
       delete root.dataset.preload;
     };
 
-    // `animationend` BUBBLES, so a listener on the panel also hears the
-    // mark and the wordmark finishing inside it -- and a plain
-    // `{ once: true }` handler fired on the first of those, tearing the
-    // panel away a beat after the logo appeared. Match the exit by name.
+    // `animationend` BUBBLES, so a listener also hears the mark and the
+    // wordmark finishing -- and a plain `{ once: true }` handler fired on
+    // the first of those, tearing the panel away a beat after the logo
+    // appeared. Match the exit by name.
     const onEnd = (event: AnimationEvent) => {
       if (event.animationName === "cw-preloader-out") finish();
     };
 
-    const panel = document.querySelector<HTMLElement>(".cw-preloader");
-    panel?.addEventListener("animationend", onEnd);
-    const fallback = window.setTimeout(finish, FALLBACK_MS);
+    // On the document, not on the panel node. A navigation followed by
+    // `router.refresh()` can swap that node out mid-animation: the old
+    // one's animation is cancelled and never reports ending, and a
+    // listener bound to it waits forever on an element no longer on the
+    // page. The document outlives every node, and bubbling brings the
+    // replacement's event to it.
+    document.addEventListener("animationend", onEnd);
+    window.setTimeout(finish, FALLBACK_MS);
 
     return () => {
-      panel?.removeEventListener("animationend", onEnd);
-      window.clearTimeout(fallback);
-      // Deliberately NOT clearing the attribute here. React StrictMode
-      // runs effects mount -> cleanup -> mount in development, so doing
-      // so wiped `data-preload` milliseconds after the first mount and
-      // the intro never played at all. Nothing needs it anyway: the
-      // panel is this component's own markup, so unmounting removes it
-      // from the page, and the fallback above guarantees the attribute
-      // goes even if the animation never reports finishing.
+      document.removeEventListener("animationend", onEnd);
+      // Neither the attribute NOR the fallback timer is cleared here.
+      //
+      // The attribute: React StrictMode runs effects mount -> cleanup ->
+      // mount in development, so clearing it wiped `data-preload`
+      // milliseconds after the first mount and the intro never played.
+      //
+      // The timer: it used to be cancelled here, which made it a safety
+      // net that disappeared at exactly the moment it was needed. Any
+      // remount mid-intro cancelled it, and if the animation was also
+      // cancelled, nothing was left to lift a full-screen panel off the
+      // page -- which is how onboarding froze behind the logo. `finish`
+      // only deletes an attribute, so letting a stale timer run is
+      // harmless, and now the panel is gone within nine seconds no matter
+      // what happened to the component in between.
     };
   }, []);
 
