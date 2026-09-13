@@ -16,8 +16,8 @@ Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase
 ```
 
 1. **Sources real work** from three public feeds — Hacker News' monthly hiring thread, Remotive, and RemoteOK — filtered for contract and freelance postings, then **checks every link is still live** before spending a model call on it.
-2. **Scores each one 0–100 against *your* profile**, with a written rationale and the specific evidence from your own portfolio that justifies it. Bad matches score low and stay low; it will not pitch something it doesn't believe in.
-3. **Drafts outreach in your voice**, quoting the case study that earned the score:
+2. **Scores each one 0–100 against your real work, and shows its proof.** The scorer is handed a numbered list of your actual repositories (straight from the GitHub API), portfolio projects and skills, and every reason it gives must cite one of them. Code then checks each citation exists, drops anything invented, and caps the score: **a strong match (60+) needs a real project**, skills alone top out at 59, and no valid evidence caps it at 40. Each reason on the card links to the repository or page it rests on, so a score can be verified by clicking.
+3. **Drafts outreach in your voice when you choose to pitch** — nothing is drafted for you unasked — quoting the case study that earned the score:
 
    > *"I recently migrated a legacy invoicing flow to Stripe Billing for a B2B SaaS, cutting failed-payment churn by 40%."*
 
@@ -152,7 +152,7 @@ Then open `http://localhost:3000`. The onboarding form is the front door: fillin
 
 Your work is kept until you delete it. The email you onboard with is also how you get back: **Log out** in Settings forgets this browser, `/signin` takes that email and reopens the same workspace, and **Delete this account** removes the workspace and everything in it for good. That last one is a real delete — every table cascades off the account row, and nothing is soft-deleted or kept behind the scenes.
 
-Onboarding asks for three things and reads the rest: who you are, what you charge, and where your work lives. Required fields are starred. The last step takes a **GitHub** link, a **portfolio** link, or both — and when you press *Find me work* it reads them (GitHub through the public API, the site over HTTP) to fill in your summary, extra skills and the past results pitches quote. Nobody is asked to type their own case studies into a form, because nobody enjoys that and no client asks for it either.
+Onboarding asks for three things and reads the rest: who you are, what you charge, and where your work lives. Required fields are starred. The last step takes a **GitHub** link, a **portfolio** link, or both — and when you press *Find me work* it reads them — your best repositories and their READMEs through the public API, the site over HTTP — to fill in your summary, extra skills and the past results pitches quote. Setup then finds leads, checks their links and scores a first batch, with a progress bar that moves as each stage really finishes, and lands on the dashboard with a summary. It drafts no pitch on its own: you pick the lead. Nobody is asked to type their own case studies into a form, because nobody enjoys that and no client asks for it either.
 
 LinkedIn and CV upload are deliberately absent. LinkedIn blocks automated reading, so a LinkedIn field would collect a link the agent can never use; and a CV pasted as text is a worse copy of what GitHub and a portfolio already show. Optional refinements — years of experience, hours a week, a minimum project size — live in Settings, marked optional.
 

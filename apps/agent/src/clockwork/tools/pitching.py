@@ -17,6 +17,7 @@ from strands import tool
 
 from ..context import current_user_id
 from ..db import get_client
+from ..evidence import evidence_text
 from ..greeting import apply_greeting, greeting_instruction
 from ..ledger import invoke_model
 from ..models import Role
@@ -96,7 +97,7 @@ def draft_pitch_for(opportunity_id: str) -> dict:
             f"Posted by (a username or company, not a name to greet): {opp.get('author')}\n"
             f"Body:\n{(opp.get('body') or '')[:MAX_BODY_CHARS]}\n\n"
             "WHY THIS WAS FLAGGED AS A MATCH\n"
-            + ("\n".join(f"- {e}" for e in evidence) if evidence else "- (not scored yet)")
+            + ("\n".join(f"- {evidence_text(e)}" for e in evidence) if evidence else "- (not scored yet)")
             + "\n\nWrite the outbound message."
         ),
         system_prompt=(

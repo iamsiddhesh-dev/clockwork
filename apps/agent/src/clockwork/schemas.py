@@ -33,8 +33,9 @@ class FitScore(BaseModel):
     )
     evidence: list[str] = Field(
         default_factory=list,
-        description="Concrete facts from the freelancer's own profile that justify the score "
-        "-- named skills or portfolio case studies, not vague praise.",
+        description="Why they fit, each item starting with the id of the EVIDENCE entry it "
+        "rests on, e.g. '[W1] Built a payment-recovery engine, the core of this role'. "
+        "Only ids from the list; items without a valid id are discarded.",
     )
     concerns: list[str] = Field(
         default_factory=list,
@@ -133,8 +134,8 @@ class ImportedProfile(BaseModel):
     )
     highlights: list[str] = Field(
         default_factory=list,
-        description="At most 3 past results, strongest first. Each ONE string in the "
-        "form 'Short name — what it was and what it achieved'. Keep any real number "
-        "exactly as written. Only things the material actually shows; an empty list "
-        "is a correct answer.",
+        description="At most 4 past results, strongest first. Each ONE string in the "
+        "form '[GitHub] Short name — what it was and what it achieved' (or [Portfolio]). "
+        "Keep any real number exactly as written. Only things the material actually "
+        "shows; an empty list is a correct answer.",
     )

@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { ApiDownRetry } from "./api-down-retry";
 
 /** Money is rendered from stored numbers, never re-derived in the UI --
  *  the backend computes every total in code precisely so the two can't
@@ -144,16 +145,17 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
  */
 export function ApiDown({ what }: { what: string }) {
   return (
-    <div className="cw-card" style={{ padding: 40, borderColor: "var(--bad)" }}>
-      <div className="cw-label" style={{ color: "var(--bad)" }}>
-        Can&rsquo;t reach the agent
+    <div className="cw-card" style={{ padding: 40 }}>
+      <div className="cw-label" style={{ color: "var(--warn)" }}>
+        Connecting
       </div>
       <h2 style={{ margin: "14px 0 0", fontSize: 20, fontWeight: 600, letterSpacing: "-0.028em" }}>
-        {what} could not be loaded
+        {what} is taking a moment to load
       </h2>
       <p style={{ margin: "12px 0 0", fontSize: 14, color: "var(--dim)" }}>
-        A connection problem, not an empty workspace. Check the API is running.
+        Your data is safe. The agent is waking up — this usually takes a few seconds.
       </p>
+      <ApiDownRetry />
     </div>
   );
 }

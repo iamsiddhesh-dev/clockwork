@@ -20,7 +20,8 @@ function Row({
   children,
 }: {
   title: string;
-  blurb: string;
+  /** Only when it says something the title doesn't. */
+  blurb?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -35,9 +36,11 @@ function Row({
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
-        <p style={{ margin: "5px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--dim)" }}>
-          {blurb}
-        </p>
+        {blurb && (
+          <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--dim)" }}>
+            {blurb}
+          </p>
+        )}
       </div>
       <div style={{ flex: "none" }}>{children}</div>
     </div>
@@ -122,9 +125,7 @@ export function SettingsView({
     <>
       <Card pad={26} style={{ maxWidth: 760 }}>
         <SectionHead title="Profile" />
-        <p style={{ margin: "8px 0 22px", fontSize: 13.5, color: "var(--dim)" }}>
-          What every score, pitch and quote is built from.
-        </p>
+        <div style={{ height: 18 }} />
         <ProfileForm initial={profile} submitLabel="Save changes" />
       </Card>
 
@@ -133,14 +134,14 @@ export function SettingsView({
         <div style={{ marginTop: 18, display: "flex", flexDirection: "column" }}>
           <Row
             title="Approve before sending"
-            blurb="Enforced in code, not settings. There is nothing here to switch off."
+            blurb="Always on — nothing is sent without you."
           >
             <Toggle on locked label="Approve before sending (enforced in code)" />
           </Row>
 
           <Row
             title="Daily spend cap"
-            blurb="Past this, it drops to the cheaper model rather than stopping."
+            blurb="Past this, it switches to a cheaper model."
           >
             <span className="cw-mono" style={{ fontSize: 14, fontWeight: 500 }}>
               ${dailyCapUsd.toFixed(2)}
@@ -149,7 +150,6 @@ export function SettingsView({
 
           <Row
             title="Wake schedule"
-            blurb="How often it wakes up on its own."
           >
             <span className="cw-mono" style={{ fontSize: 14, fontWeight: 500 }}>
               every 5 min
@@ -158,12 +158,11 @@ export function SettingsView({
 
           <Row
             title="Ambient lighting"
-            blurb="The colour drifting behind the interface."
           >
             <Toggle on={ambient} onClick={toggleAmbient} label="Ambient lighting" />
           </Row>
 
-          <Row title="Theme" blurb="Dark or light.">
+          <Row title="Light theme">
             <Toggle on={theme === "light"} onClick={toggleTheme} label="Light theme" />
           </Row>
         </div>
@@ -180,7 +179,7 @@ export function SettingsView({
             maxWidth: "62ch",
           }}
         >
-          Anyone who posts here wakes the agent: it qualifies the lead and drafts a reply.
+          Share it with clients. Every enquiry gets a drafted reply for you to approve.
         </p>
         <div className="cw-row" style={{ marginTop: 16, gap: 10 }}>
           <code
@@ -280,13 +279,11 @@ function AccountCard({ account }: { account: AccountRecord | null }) {
           <p style={{ margin: "8px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--dim)" }}>
             {account.email ? (
               <>
-                Signed in as <strong style={{ color: "var(--ink)" }}>{account.email}</strong>. Your
-                work stays here until you delete it.
+                Signed in as <strong style={{ color: "var(--ink)" }}>{account.email}</strong>
               </>
             ) : (
               <>
-                This workspace has no email on it yet, so there is no way back to it if this browser
-                forgets the cookie. Add one to your profile above.
+                Add an email to your profile to be able to sign back in.
               </>
             )}
           </p>
@@ -303,14 +300,14 @@ function AccountCard({ account }: { account: AccountRecord | null }) {
         </p>
       )}
 
-      <p style={{ margin: "16px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--quiet)" }}>
-        There is no password. Anyone who knows that email, or this id, can open this workspace.
+      <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--quiet)" }}>
+        No password — anyone with this email can open this workspace.
       </p>
 
       <div style={{ marginTop: 20, display: "flex", flexDirection: "column" }}>
         <Row
           title="Log out"
-          blurb="Forgets this browser only. Sign back in with your email and everything is where you left it."
+          blurb="Sign back in anytime with your email."
         >
           <button className="cw-btn" onClick={logOut}>
             Log out
@@ -319,7 +316,7 @@ function AccountCard({ account }: { account: AccountRecord | null }) {
 
         <Row
           title="Delete this account"
-          blurb="Your profile, leads, threads, deals, quotes, invoices and run history. Permanently, with no copy kept."
+          blurb="Permanently removes your profile and everything in it."
         >
           {confirming ? null : (
             <button

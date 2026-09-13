@@ -598,8 +598,15 @@ def sync_opportunities(user_id: str = Depends(get_current_user_id)) -> dict:
     """Pull every enabled feed and cache the results. Per-source result is
     returned so a feed that errored is visible rather than silently
     looking like 'no new leads'."""
-    with run_context(user_id=user_id, run_id=None):
-        return sync_sources(user_id)
+    with manual_run(user_id, label="Find leads") as run:
+        result = sync_sources(user_id)
+        per_source = " · ".join(
+            f"{s['kind']} {s.get('fetched', 0)}" if s.get("ok") else f"{s['kind']} failed"
+            for s in result.get("sources", [])
+        )
+        run.outcome = f"Found {result.get('total', 0)} postings ({per_source})"
+        run.step(run.outcome, tool="sync_sources")
+        return result
 
 
 class ScoreRequest(BaseModel):
@@ -635,7 +642,15 @@ def verify_links(req: VerifyRequest, user_id: str = Depends(get_current_user_id)
     round trip to someone else's server. See sources/verify.py for why
     this is plain HTTP and not a headless browser.
     """
-    return verify_opportunities(user_id, limit=req.limit, force=req.force)
+    with manual_run(user_id, label="Check links") as run:
+        result = verify_opportunities(user_id, limit=req.limit, force=req.force)
+        dead = result.get("gone", 0) + result.get("closed", 0)
+        run.outcome = (
+            f"Checked {result.get('checked', 0)} links — {result.get('live', 0)} live"
+            + (f", {dead} no longer open and set aside" if dead else "")
+        )
+        run.step(run.outcome, tool="verify_links")
+        return result
 
 
 @app.post("/opportunities/{opportunity_id}/pitch")
@@ -699,7 +714,10 @@ def _executed_line(action_type: str, result: dict) -> str:
 
 class KickoffRequest(BaseModel):
     score_limit: int = 6
-    pitch_top: int = 1
+    # No pitch unless asked for. Someone who has just set up wants to look
+    # at their leads and choose; a pitch drafted on their behalf for a lead
+    # they may not want spends writer tokens on text most people reject.
+    pitch_top: int = 0
 
 
 @app.post("/kickoff")

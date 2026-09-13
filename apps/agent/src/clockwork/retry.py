@@ -17,12 +17,28 @@ Strands produces. Match on the whole cause chain, never the top-level
 type.
 """
 
+import sys
 import time
-from typing import Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar
 
-from litellm.exceptions import RateLimitError
+if TYPE_CHECKING:  # pragma: no cover - for type checkers only
+    from litellm.exceptions import RateLimitError
 
 T = TypeVar("T")
+
+
+def _rate_limit_error_class():
+    """LiteLLM's RateLimitError, without importing LiteLLM to get it.
+
+    Importing LiteLLM costs about twelve seconds, and this module sits on
+    the API's import path through the scheduler -- so a top-level import
+    here made every cold start slow even for requests that never touch a
+    model. The check below is also exact rather than a shortcut: if
+    LiteLLM has never been imported in this process, no exception in any
+    chain can possibly be one of its errors.
+    """
+    module = sys.modules.get("litellm.exceptions")
+    return getattr(module, "RateLimitError", None) if module else None
 
 MAX_ATTEMPTS = 3
 DEFAULT_BACKOFF_SECONDS = 5.0
@@ -50,10 +66,13 @@ def _chain(exc: BaseException):
         current = current.__cause__ or current.__context__
 
 
-def root_rate_limit_error(exc: BaseException) -> RateLimitError | None:
+def root_rate_limit_error(exc: BaseException) -> "RateLimitError | None":
     """The RateLimitError anywhere in `exc`'s chain, if there is one."""
+    rate_limit_error = _rate_limit_error_class()
+    if rate_limit_error is None:
+        return None
     for item in _chain(exc):
-        if isinstance(item, RateLimitError):
+        if isinstance(item, rate_limit_error):
             return item
     return None
 
@@ -62,7 +81,7 @@ def is_tool_use_failure(exc: BaseException) -> bool:
     return any(TOOL_USE_FAILED in str(item) for item in _chain(exc))
 
 
-def _retry_after_seconds(exc: RateLimitError) -> float:
+def _retry_after_seconds(exc: "RateLimitError") -> float:
     response = getattr(exc, "response", None)
     header = response.headers.get("retry-after") if response is not None else None
     if header:

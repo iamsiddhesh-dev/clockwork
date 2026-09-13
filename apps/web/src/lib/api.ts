@@ -78,6 +78,21 @@ export type PortfolioItem = {
   title: string;
   summary: string;
   tags?: string[];
+  /** Where this came from -- "GitHub" or "Portfolio" -- and a link to it,
+   *  so a score that cites it can be checked by clicking through. */
+  source?: string;
+  url?: string | null;
+};
+
+/** One reason a lead fits, tied to the real piece of work it rests on.
+ *  Older scores stored plain sentences, so a card reads both. */
+export type EvidenceItem = {
+  text: string;
+  refs?: string[];
+  kind: "work" | "skill";
+  source: string;
+  title: string;
+  url: string | null;
 };
 
 export type Profile = {
@@ -137,7 +152,7 @@ export type Opportunity = {
   posted_at: string | null;
   fit_score: number | null;
   fit_rationale: string | null;
-  fit_evidence: { evidence?: string[]; concerns?: string[] } | null;
+  fit_evidence: { evidence?: (string | EvidenceItem)[]; concerns?: string[] } | null;
   status: "new" | "scored" | "pitched" | "dismissed" | "converted";
   /** Whether the posting itself is still real. Checked with a plain HTTP
    *  request, not a browser -- see apps/agent/src/clockwork/sources/verify.py. */
@@ -375,15 +390,44 @@ export type AgentEvent = {
   created_at: string;
 };
 
+/** Statuses that mean "the server wasn't ready", not "the request was wrong". */
+const TRANSIENT = new Set([502, 503, 504]);
+
+/** Waits between attempts for a read that failed transiently. Short, because
+ *  a person is looking at a loading page while these run. */
+const READ_RETRY_DELAYS_MS = [700, 1800];
+
 async function request(path: string, account: string, init?: RequestInit) {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Clockwork-Account": account,
-      ...init?.headers,
-    },
-  });
+  const method = (init?.method ?? "GET").toUpperCase();
+  const send = () =>
+    fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Clockwork-Account": account,
+        ...init?.headers,
+      },
+    });
+
+  // Reads retry a couple of times on a network failure or a gateway error.
+  // The API runs serverless: after a quiet spell the first request lands on
+  // a cold instance, and one failed attempt used to put "Can't reach the
+  // agent" in front of whoever happened to arrive first. Writes never
+  // retry -- a POST that timed out may still have happened, and doing it
+  // again could draft a second pitch or approve something twice.
+  let res: Response | undefined;
+  for (let attempt = 0; ; attempt += 1) {
+    const canRetry = method === "GET" && attempt < READ_RETRY_DELAYS_MS.length;
+    try {
+      res = await send();
+      if (!canRetry || !TRANSIENT.has(res.status)) break;
+    } catch (err) {
+      if (!canRetry) throw err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, READ_RETRY_DELAYS_MS[attempt]));
+  }
+
+  if (!res) throw new Error(`${method} ${path} -> no response`);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
@@ -507,7 +551,7 @@ export const api = {
       body: JSON.stringify({ limit, force }),
     }),
   scoreOpportunities: (account: string, limit = 10) =>
-    apiFetch<{ scored: number; failed: number }>(`/opportunities/score`, account, {
+    apiFetch<{ scored: number; failed: number; results?: { fit_score: number }[] }>(`/opportunities/score`, account, {
       method: "POST",
       body: JSON.stringify({ limit }),
     }),

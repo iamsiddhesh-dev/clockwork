@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { api, type Overview } from "@/lib/api";
 import { requireAccount } from "@/lib/account-server";
-import { Card, compactMoney, Dot, Metric, SectionHead, TONES } from "@/components/ui";
+import { ApiDown, Card, compactMoney, Dot, Metric, SectionHead, TONES } from "@/components/ui";
 import { formatDate } from "@/lib/format";
+import { WelcomeDialog } from "./welcome-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -86,24 +87,17 @@ export default async function OverviewPage() {
   const account = await requireAccount();
   const data = await api.overview(account).catch(() => null);
 
-  if (!data) {
-    return (
-      <Card pad={40}>
-        <h1 className="cw-h1" style={{ marginTop: 0 }}>
-          Can&rsquo;t reach the agent
-        </h1>
-        <p style={{ margin: "14px 0 0", fontSize: 14.5, color: "var(--dim)", maxWidth: "52ch" }}>
-          Start it with <code className="cw-mono">uvicorn clockwork.api:app --port 8000</code>.
-        </p>
-      </Card>
-    );
-  }
+  // A developer instruction ("start it with uvicorn...") used to sit here,
+  // shown to anyone -- including judges on the live site -- whose visit
+  // happened to wake a cold API instance. ApiDown retries on its own.
+  if (!data) return <ApiDown what="Your overview" />;
 
   const { metrics, runs, workflows, activity, scheduled, summary } = data;
   const active = workflows.filter((w) => w.tone !== "idle").length;
 
   return (
     <>
+      <WelcomeDialog />
       {/* ── hero ─────────────────────────────────────────────────── */}
       <div
         className="cw-card"

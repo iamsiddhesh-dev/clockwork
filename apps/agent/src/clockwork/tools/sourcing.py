@@ -17,6 +17,7 @@ from strands import tool
 
 from ..context import current_user_id
 from ..db import get_client
+from ..evidence import capped_score, evidence_index, render_index, verify_evidence
 from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import FitScore
@@ -96,19 +97,22 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
         raise ValueError(f"opportunity {opportunity_id} not found")
     opp = opp_res.data
 
+    # The numbered list the score must cite from -- see evidence.py.
+    index = evidence_index(profile)
+
     result = invoke_model(
         Role.EXTRACTOR,
         (
-            "FREELANCER PROFILE\n"
-            f"Name: {profile.get('name')}\n"
+            "FREELANCER\n"
             f"Title: {profile.get('title') or 'not stated'}\n"
             f"Experience: {_experience_line(profile)}\n"
-            f"Skills: {', '.join(profile.get('skills') or []) or 'none listed'}\n"
             f"Overview: {profile.get('positioning') or 'none given'}\n"
             f"Rates: {profile.get('rates') or {}}\n"
             f"Availability: {_availability_line(profile)}\n"
-            f"Will not take work under: {_floor_line(profile)}\n"
-            f"Portfolio: {profile.get('portfolio') or []}\n\n"
+            f"Will not take work under: {_floor_line(profile)}\n\n"
+            "EVIDENCE YOU MAY CITE — their real repositories, portfolio projects and "
+            "skills. Anything not on this list is not evidence.\n"
+            f"{render_index(index)}\n\n"
             "OPPORTUNITY\n"
             f"Title: {opp.get('title')}\n"
             f"Posted by: {opp.get('author')}\n"
@@ -120,8 +124,14 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
             "You score freelance opportunities for fit against one freelancer's real "
             "profile. Be sceptical and specific. A posting for a full-time salaried "
             "role, or one needing a stack they don't list, scores low no matter how "
-            "attractive it sounds. Only cite evidence that actually appears in their "
-            "profile -- never invent experience they haven't claimed.\n\n"
+            "attractive it sounds.\n\n"
+            "EVIDENCE RULES. Every evidence item MUST begin with the id of the entry "
+            "it rests on, e.g. '[W2] Built a Stripe billing service, which is what this "
+            "posting needs'. Cite only ids from the EVIDENCE list. Prefer [W] entries -- "
+            "real projects -- over [S] skills. A strong score (60+) requires at least "
+            "one [W] project that genuinely matches the posting; if none does, score "
+            "below 60 and say what is missing in concerns. Evidence without a valid id "
+            "is discarded.\n\n"
             "Score DOWN hard, and name which of these applies, when: the hours it "
             "implies exceed the freelancer's stated availability; the stated budget "
             "is clearly below the floor they gave; or the seniority is far off their "
@@ -132,12 +142,21 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
     )
     fit: FitScore = result.structured_output
 
-    score = max(0, min(100, int(fit.score)))
+    # Checked in code, not taken on trust: evidence citing an entry that
+    # doesn't exist is dropped, and a score with no real project behind it
+    # is capped -- with the reason added to the concerns, so a capped score
+    # never reads as arbitrary.
+    evidence = verify_evidence(fit.evidence, index)
+    score, cap_reason = capped_score(fit.score, evidence)
+    concerns = list(fit.concerns)
+    if cap_reason and cap_reason not in concerns:
+        concerns.append(cap_reason)
+
     client.table("opportunity").update(
         {
             "fit_score": score,
             "fit_rationale": fit.rationale,
-            "fit_evidence": {"evidence": fit.evidence, "concerns": fit.concerns},
+            "fit_evidence": {"evidence": evidence, "concerns": concerns},
             "status": "scored",
             "updated_at": "now()",
         }
@@ -147,8 +166,8 @@ def score_opportunity(opportunity_id: str, *, profile: dict | None = None) -> di
         "opportunity_id": opportunity_id,
         "fit_score": score,
         "rationale": fit.rationale,
-        "evidence": fit.evidence,
-        "concerns": fit.concerns,
+        "evidence": evidence,
+        "concerns": concerns,
     }
 
 

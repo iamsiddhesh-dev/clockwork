@@ -154,18 +154,12 @@ export async function readLinks(
 export function completeness(form: ProfileDraft) {
   const links = form.links ?? {};
   const checks: { done: boolean; gain: string }[] = [
-    { done: Boolean(form.years_experience), gain: "years of experience catches seniority mismatches" },
-    { done: Boolean(form.availability_hours), gain: "hours a week filters out full-time roles" },
-    { done: Boolean(form.min_project_budget), gain: "a minimum rejects underpaid work for you" },
-    { done: form.skills.length >= 3, gain: "three or more skills rank leads far better than one" },
-    {
-      done: Boolean(links.github?.trim() && links.website?.trim()),
-      gain: "both GitHub and a portfolio give pitches more real work to cite",
-    },
-    {
-      done: usablePortfolio(form).length > 0,
-      gain: "reading your links finds the results pitches quote",
-    },
+    { done: usablePortfolio(form).length > 0, gain: "read your work so scores have projects to cite" },
+    { done: form.skills.length >= 3, gain: "list at least three skills" },
+    { done: Boolean(links.github?.trim() && links.website?.trim()), gain: "add both GitHub and a portfolio" },
+    { done: Boolean(form.years_experience), gain: "add your years of experience" },
+    { done: Boolean(form.availability_hours), gain: "add your weekly availability" },
+    { done: Boolean(form.min_project_budget), gain: "set a minimum project size" },
   ];
   const done = checks.filter((c) => c.done).length;
   return {
@@ -257,7 +251,7 @@ export function ProfileFields({
 
       {show("work") && (
         <>
-          <Field label="Skills" required hint="Leads are ranked against these." htmlFor={skillsId}>
+          <Field label="Skills" required htmlFor={skillsId}>
             <TagInput
               id={skillsId}
               values={form.skills}
@@ -268,7 +262,14 @@ export function ProfileFields({
             />
           </Field>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+              gap: 14,
+              alignItems: "end",
+            }}
+          >
             <Field label="Hourly rate" required>
               <NumberField
                 value={form.rates?.hourly ?? null}
@@ -291,32 +292,40 @@ export function ProfileFields({
           </div>
 
           {inSettings && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
-                <Field label="Years of experience" optional>
-                  <NumberField
-                    value={form.years_experience}
-                    onChange={(v) => set("years_experience", v)}
-                    min={0}
-                    max={60}
-                    suffix="years"
-                    placeholder="8"
-                  />
-                </Field>
+            // One row, short labels, aligned on the boxes rather than the
+            // labels. The minimum-project field used to span the full width
+            // under a hint line, so none of the three boxes lined up.
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                gap: 14,
+                alignItems: "end",
+              }}
+            >
+              <Field label="Experience" optional>
+                <NumberField
+                  value={form.years_experience}
+                  onChange={(v) => set("years_experience", v)}
+                  min={0}
+                  max={60}
+                  suffix="years"
+                  placeholder="8"
+                />
+              </Field>
 
-                <Field label="Hours a week you're free" optional>
-                  <NumberField
-                    value={form.availability_hours}
-                    onChange={(v) => set("availability_hours", v)}
-                    min={1}
-                    max={168}
-                    suffix="hrs"
-                    placeholder="25"
-                  />
-                </Field>
-              </div>
+              <Field label="Availability" optional>
+                <NumberField
+                  value={form.availability_hours}
+                  onChange={(v) => set("availability_hours", v)}
+                  min={1}
+                  max={168}
+                  suffix="hrs/wk"
+                  placeholder="25"
+                />
+              </Field>
 
-              <Field label="Ignore projects smaller than" optional hint="Leave blank to see everything.">
+              <Field label="Minimum project" optional>
                 <NumberField
                   value={form.min_project_budget}
                   onChange={(v) => set("min_project_budget", v)}
@@ -325,7 +334,7 @@ export function ProfileFields({
                   placeholder="3000"
                 />
               </Field>
-            </>
+            </div>
           )}
         </>
       )}
@@ -377,30 +386,25 @@ function ProofFields({
 
   return (
     <>
-      <p style={{ margin: 0, fontSize: 12.5, color: "var(--quiet)" }}>
-        Add at least one<span style={{ color: "var(--orange-ink)" }}> *</span>
-      </p>
-
-      <Field label="GitHub" htmlFor={githubId}>
-        <input
-          id={githubId}
-          className="cw-input"
-          value={links.github ?? ""}
-          onChange={(e) => setLink("github", e.target.value)}
-          placeholder="github.com/maya"
-          autoComplete="url"
-        />
-      </Field>
-
-      <Field label="Portfolio" htmlFor={websiteId}>
-        <input
-          id={websiteId}
-          className="cw-input"
-          value={links.website ?? ""}
-          onChange={(e) => setLink("website", e.target.value)}
-          placeholder="maya.dev"
-          autoComplete="url"
-        />
+      {/* One required group, not two fields and a floating "add at least
+          one" line: the requirement belongs to the pair, so the label does. */}
+      <Field label="GitHub or portfolio" required htmlFor={githubId}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <LabelledInput
+            id={githubId}
+            label="GitHub"
+            value={links.github ?? ""}
+            onChange={(v) => setLink("github", v)}
+            placeholder="github.com/maya"
+          />
+          <LabelledInput
+            id={websiteId}
+            label="Portfolio"
+            value={links.website ?? ""}
+            onChange={(v) => setLink("website", v)}
+            placeholder="maya.dev"
+          />
+        </div>
       </Field>
 
       {canRead && (
@@ -417,6 +421,71 @@ function ProofFields({
         </div>
       )}
     </>
+  );
+}
+
+/** A text box with its name inside it, drawn like NumberField's prefix
+ *  so every box on the form shares one shape. */
+function LabelledInput({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "stretch",
+        border: "1px solid var(--rim)",
+        background: "var(--glass)",
+        borderRadius: "var(--r-ctl)",
+        boxShadow: "var(--hi)",
+        overflow: "hidden",
+      }}
+    >
+      <label
+        htmlFor={id}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          width: 92,
+          flex: "none",
+          padding: "0 13px",
+          fontSize: 13,
+          color: "var(--quiet)",
+          borderRight: "1px solid var(--rim)",
+          cursor: "text",
+        }}
+      >
+        {label}
+      </label>
+      <input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete="url"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          border: 0,
+          outline: 0,
+          background: "none",
+          fontFamily: "inherit",
+          fontSize: 13.5,
+          color: "var(--ink)",
+          padding: "11px 13px",
+        }}
+      />
+    </div>
   );
 }
 
@@ -439,7 +508,7 @@ export function CompletenessBar({ form }: { form: ProfileDraft }) {
         />
       </div>
       <p style={{ margin: "12px 0 0", fontSize: 12.5, lineHeight: 1.6, color: "var(--quiet)" }}>
-        Each of these measurably improves the work: {missing.slice(0, 3).join("; ")}.
+        Next: {missing[0]}.
       </p>
     </div>
   );

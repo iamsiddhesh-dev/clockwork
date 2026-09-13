@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
-import { api, type Opportunity, type Source } from "@/lib/api";
+import { api, type EvidenceItem, type Opportunity, type Source } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { requireAccountClient } from "@/lib/account";
 import { Empty } from "@/components/ui";
@@ -36,6 +36,40 @@ const LINK_STATE: Record<
   gone: { label: "posting gone", color: "var(--bad)", dead: true },
   unreachable: { label: "couldn't check", color: "var(--warn)" },
 };
+
+/**
+ * One reason a lead fits, with the piece of work it rests on.
+ *
+ * A score's evidence is checked on the server against the freelancer's
+ * real repositories, portfolio projects and skills (see the agent's
+ * evidence.py), and each surviving reason names its source. Showing that
+ * source -- and linking to it -- is what makes the score something a
+ * person can verify rather than take on trust.
+ */
+function EvidenceLine({ item }: { item: string | EvidenceItem }) {
+  if (typeof item === "string") return <span>{item}</span>;
+  const label = item.kind === "skill" ? `Skill · ${item.title}` : `${item.source} · ${item.title}`;
+  return (
+    <span>
+      {item.text}{" "}
+      {item.url ? (
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="cw-mono"
+          style={{ fontSize: 11, color: "var(--orange-ink)", whiteSpace: "nowrap" }}
+        >
+          {label} ↗
+        </a>
+      ) : (
+        <span className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)", whiteSpace: "nowrap" }}>
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function checkedAgo(iso: string | null): string {
   if (!iso) return "";
@@ -343,7 +377,7 @@ export function OpportunityList({
                             <span className="cw-mono" style={{ color: "var(--ok)", flex: "none" }}>
                               +
                             </span>
-                            {line}
+                            <EvidenceLine item={line} />
                           </li>
                         ))}
                         {concerns.map((line, i) => (
