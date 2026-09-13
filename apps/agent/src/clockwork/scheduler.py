@@ -246,9 +246,23 @@ def tick(user_id: str) -> list[dict]:
     ]
 
 
-def tick_all_due() -> list[dict]:
-    """Run every due task, for whichever user it belongs to. Due-ness is
+def tick_all_due(limit: int | None = None) -> list[dict]:
+    """Run due tasks, for whichever user they belong to. Due-ness is
     checked per task against that task's own user's clock -- offsets are
     per-user (app_setting.clock_offset_seconds), not a single global
-    `now`, so this can't be a single WHERE due_at <= now() query."""
-    return [_run_task(t) for t in _pending_tasks() if _is_due(t) and _claim(t["id"])]
+    `now`, so this can't be a single WHERE due_at <= now() query.
+
+    `limit` caps how many tasks one call claims. It exists for serverless
+    hosting, where a request is killed at a hard deadline: a task claimed
+    and then cut off mid-run stays `running` forever, because nothing ever
+    comes back to mark it done or failed. Claiming only as many as fit
+    leaves the rest `pending` for the next call, which is exactly where a
+    task that has not started belongs.
+    """
+    fired: list[dict] = []
+    for task in _pending_tasks():
+        if limit is not None and len(fired) >= limit:
+            break
+        if _is_due(task) and _claim(task["id"]):
+            fired.append(_run_task(task))
+    return fired

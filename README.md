@@ -31,7 +31,7 @@ Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase
 Most agents are request→response. Clockwork has two ways to wake up, and both go through a single `run_agent()`:
 
 - **Event** — a lead arrives via the public intake endpoint.
-- **Time** — a background scheduler drains due tasks and fires the agent with no human present.
+- **Time** — a scheduler drains due tasks and fires the agent with no human present: an in-process timer when running as a server, a scheduled call to `POST /tasks/tick` when hosted serverless.
 
 That second one is the whole point, and it's why there's a **virtual clock**: every time read in the codebase goes through `clock.now()`, so you can advance the clock several days from the UI and watch the follow-up ladder fire in seconds instead of waiting a week.
 
@@ -163,6 +163,20 @@ cd apps/agent && python scripts/seed_demo.py
 ```
 
 It prints a workspace id and the one-line cookie to set. Every row it writes is marked as demo data, and it deliberately does **not** fake agent runs, events or approvals — those are the audit trail, and inventing work the agent never did is exactly what the rest of this README refuses to do.
+
+---
+
+## Deploying to Vercel
+
+Two Vercel projects from this one repository. Order matters, because each needs the other's URL.
+
+**1. The agent API** — New Project → import the repo → **Root Directory `apps/agent`**. Vercel detects FastAPI and loads `app.py`. Add environment variables `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, then deploy and copy the URL.
+
+**2. The web app** — New Project → same repo → **Root Directory `apps/web`**. Add `NEXT_PUBLIC_API_URL` = the API's URL, then deploy and copy the URL. The build refuses to finish if this is missing or points at localhost, rather than shipping a site that can't reach its own backend.
+
+**3. Connect them** — in the API project, add `ALLOWED_ORIGINS` = the web app's URL, then redeploy the API. Until this is set, browsers block the site from calling the API.
+
+**4. The clock** — the API has no always-running process on Vercel, so the local 30-second scheduler does not run there. The in-app **+3d / +7d** controls still drain due tasks immediately. For the agent to also wake up on its own, set `CRON_SECRET` (any long random string) on the API project, and add repository secrets `AGENT_API_URL` and `CRON_SECRET` on GitHub; [`agent-tick.yml`](.github/workflows/agent-tick.yml) then calls `POST /tasks/tick` every five minutes. It claims at most three tasks per call, so no agent run is cut off by Vercel's 300-second limit, and the rest wait for the next tick.
 
 ---
 

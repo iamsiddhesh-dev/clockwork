@@ -12,7 +12,14 @@
  * site that a request is scoped to one workspace.
  */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Trailing slash stripped: every path below starts with "/", and a URL
+// pasted as "https://clockwork-api.vercel.app/" would otherwise produce
+// "//runs", which some hosts answer with a redirect and fetch then follows
+// as a GET, turning every POST into a confusing 405.
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000").replace(
+  /\/+$/,
+  "",
+);
 
 export type Approval = {
   id: string;

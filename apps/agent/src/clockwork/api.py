@@ -34,6 +34,8 @@ Routes:
   POST  /clock/advance             -> demo control: fast-forward + drain
                                        any tasks that become due
   POST  /clock/reset               -> demo control: back to real time
+  POST  /tasks/tick                -> scheduler: drain due tasks (Bearer
+                                       CRON_SECRET; for serverless hosts)
   GET   /health
 
 Gmail OAuth (inbound polling / send) is not wired here yet -- see
@@ -44,8 +46,8 @@ Lists are paginated: `?limit=&offset=`, with the unfiltered total in
 an `X-Total-Count` response header rather than wrapped around the body,
 so the shape a caller parses does not change with the feature.
 
-Identity: every route above except /accounts, /accounts/signin, /intake
-and /health
+Identity: every route above except /accounts, /accounts/signin, /intake,
+/tasks/tick (which takes the scheduler secret instead) and /health
 requires an `X-Clockwork-Account: <uuid>` header naming an existing
 workspace (see auth.py, which is explicit that this identifies rather
 than authenticates). Every route that touches one specific resource (a
@@ -55,20 +57,24 @@ SSE route is the one exception to the header rule: browser EventSource
 can't send custom headers, so it takes `?account=` as a query param
 instead, resolved the same way.
 
-Background: an APScheduler job polls `scheduler.tick_all_due()` every 30s
-so tasks fire in real time too, not only right after `/clock/advance`
-(see `lifespan` below) -- the "Worker loop (APScheduler)" from PLAN.md's
-architecture diagram.
+Background: when this runs as a long-lived server (uvicorn, locally), an
+APScheduler job polls `scheduler.tick_all_due()` every 30s so tasks fire
+in real time too, not only right after `/clock/advance` (see `lifespan`
+below) -- the "Worker loop (APScheduler)" from PLAN.md's architecture
+diagram. On Vercel there is no long-lived process for that timer to live
+in, so the same drain is exposed as `POST /tasks/tick` and called from
+outside on a schedule instead.
 """
 
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -79,12 +85,14 @@ from .auth import (
     account_from_query,
     claim_email,
     create_account,
+    cron_authorized,
     delete_account,
     get_account,
     get_current_user_id,
     resolve_account,
     sign_in,
 )
+from .config import parse_origins, settings
 from .context import run_context
 from .db import get_client
 from .executor import execute_approval
@@ -112,8 +120,20 @@ def _poll_tick() -> None:
         logger.exception("background tick_all_due() failed")
 
 
+#: Set by Vercel on every build and invocation.
+ON_SERVERLESS = bool(os.environ.get("VERCEL"))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Not on serverless. An instance there is frozen between requests, so a
+    # 30-second timer would fire only in whatever gaps an instance happens
+    # to stay warm, from however many instances exist at once -- neither
+    # reliable nor predictable. POST /tasks/tick replaces it there.
+    if ON_SERVERLESS:
+        yield
+        return
+
     background_scheduler = BackgroundScheduler()
     background_scheduler.add_job(_poll_tick, "interval", seconds=30, id="tick_all_due")
     background_scheduler.start()
@@ -125,12 +145,13 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Clockwork Agent API", lifespan=lifespan)
 
-# Dev-only CORS: the Next.js dev server runs on a different origin than
-# this API. Tighten this to the deployed frontend's real origin before
-# shipping past local/demo use.
+# Which browser origins may call this API. Read from ALLOWED_ORIGINS so the
+# same code serves the local dev server and the deployed frontend; see
+# config.py for the defaults.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=parse_origins(settings.allowed_origins),
+    allow_origin_regex=settings.allowed_origin_regex or None,
     allow_methods=["*"],
     allow_headers=["*"],
     # Without this the browser hands the frontend a response whose
@@ -1133,3 +1154,29 @@ def advance_clock(req: ClockAdvanceRequest, user_id: str = Depends(get_current_u
 def reset_clock(user_id: str = Depends(get_current_user_id)) -> dict:
     new_now = clock.reset(user_id)
     return {"now": new_now.isoformat()}
+
+
+# ── scheduled tick ──────────────────────────────────────────────────────
+#
+# The serverless replacement for the in-process 30-second poll. Something
+# outside calls this on a schedule -- a GitHub Actions workflow, since the
+# free Vercel plan only runs cron once a day -- and it drains whatever is
+# due across every workspace, exactly as the local timer does.
+
+#: Tasks claimed per call. Each is an agent run of anywhere from a few
+#: seconds to about a minute, and a Vercel request is killed at 300s; three
+#: leaves real headroom. Anything past the cap stays pending for next time.
+TICK_LIMIT = 3
+
+
+@app.post("/tasks/tick")
+def scheduled_tick(authorization: str | None = Header(default=None)) -> dict:
+    if not settings.cron_secret:
+        # 503 rather than 401: the caller did nothing wrong, the deployment
+        # is missing a variable, and saying so saves a debugging session.
+        raise HTTPException(503, "CRON_SECRET is not configured on this deployment")
+    if not cron_authorized(authorization, settings.cron_secret):
+        raise HTTPException(401, "Missing or wrong scheduler secret")
+
+    fired = tick_all_due(limit=TICK_LIMIT)
+    return {"fired": len(fired), "limit": TICK_LIMIT, "results": fired}

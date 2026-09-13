@@ -30,6 +30,7 @@ Two routes stay open with no account at all: `POST /intake/{account_id}`
 `/health`.
 """
 
+import secrets
 from uuid import UUID
 
 from fastapi import Header, HTTPException, Query
@@ -191,6 +192,23 @@ def get_current_user_id(
     days before a deadline buys nothing a comment cannot.
     """
     return resolve_account(x_clockwork_account or "")
+
+
+def cron_authorized(authorization: str | None, secret: str | None) -> bool:
+    """Whether a scheduler call carries the shared secret.
+
+    `Authorization: Bearer <secret>` is the shape both Vercel Cron and a
+    GitHub Actions curl send. No secret configured is always False: an
+    endpoint that runs the agent across every workspace must never fall
+    open just because a deployment forgot a variable. Compared in constant
+    time so the response timing says nothing about how close a guess was.
+    """
+    if not secret:
+        return False
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return False
+    return secrets.compare_digest(token.strip().encode(), secret.encode())
 
 
 def account_from_query(account: str = Query(default="")) -> str:

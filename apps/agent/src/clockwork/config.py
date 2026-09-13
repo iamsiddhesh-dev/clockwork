@@ -26,5 +26,30 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     groq_api_key: str | None = None
 
+    # Browser origins allowed to call this API, comma-separated. Defaults to
+    # the local dev server; a deployment sets it to the frontend's real URL.
+    # A trailing slash is tolerated here because the browser never sends one
+    # and a copy-pasted "https://clockwork.vercel.app/" would otherwise match
+    # nothing and look exactly like CORS being broken.
+    allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Optional pattern for origins that change per deploy -- Vercel preview
+    # URLs, for instance. Unset means exact origins only.
+    allowed_origin_regex: str | None = None
+
+    # Shared secret for POST /tasks/tick, the endpoint an external schedule
+    # calls because a serverless deployment has no process to run a timer in.
+    # Unset means the endpoint refuses everything rather than running open.
+    cron_secret: str | None = None
+
+
+def parse_origins(raw: str | None) -> list[str]:
+    """`"https://a.app/, http://localhost:3000"` -> exact origins, no slashes.
+
+    Kept separate from Settings so it can be tested without constructing one.
+    """
+    if not raw:
+        return []
+    return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+
 
 settings = Settings()

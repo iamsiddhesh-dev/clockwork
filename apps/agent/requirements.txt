@@ -1,3 +1,21 @@
+# Runtime dependencies for the agent API, pinned to the versions it was
+# built and tested against.
+#
+# Derived, not hand-picked: walked from the packages the code actually
+# imports (fastapi, strands-agents, litellm, supabase, pydantic,
+# pydantic-settings, httpx, APScheduler, uvicorn) through every declared
+# dependency, evaluating each one's platform marker as a Linux build does.
+#
+# Two consequences worth knowing:
+#   - pywin32 is gone. It was pinned for every platform by a Windows
+#     `pip freeze`, and it does not exist on Linux, so the Vercel build
+#     failed to install. Windows still gets it: mcp requires it there, and
+#     pip resolves that on its own.
+#   - strands-agents-tools is gone. It is the optional pre-built tools
+#     add-on, not the Strands Agents SDK (that is strands-agents, below).
+#     Nothing imports it -- every tool here is written with the SDK's own
+#     @tool -- and it pulled in Slack SDKs, sympy and Pillow for nothing.
+
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
 aiosignal==1.4.0
@@ -6,18 +24,14 @@ annotated-types==0.8.0
 anyio==4.14.2
 APScheduler==3.11.3
 attrs==26.1.0
-aws-requests-auth==0.4.3
-beautifulsoup4==4.15.0
 boto3==1.43.72
 botocore==1.43.72
 certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.1
 click==8.4.2
-colorama==0.4.6
 cryptography==50.0.0
 deprecation==2.1.0
-dill==0.4.1
 distro==1.9.0
 docstring_parser==0.18.0
 fastapi==0.141.1
@@ -42,12 +56,8 @@ jmespath==1.1.0
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 litellm==1.95.0
-markdown-it-py==4.2.0
-markdownify==1.2.3
 MarkupSafe==3.0.3
 mcp==1.29.0
-mdurl==0.1.2
-mpmath==1.3.0
 multidict==6.7.1
 openai==2.54.0
 opentelemetry-api==1.44.0
@@ -56,44 +66,33 @@ opentelemetry-instrumentation-threading==0.65b0
 opentelemetry-sdk==1.44.0
 opentelemetry-semantic-conventions==0.65b0
 packaging==26.3
-pillow==12.3.0
 postgrest==2.31.0
-prompt_toolkit==3.0.53
 propcache==0.5.2
 pycparser==3.0
 pydantic==2.13.4
 pydantic-settings==2.15.0
 pydantic_core==2.46.4
-Pygments==2.21.0
 PyJWT==2.13.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 python-multipart==0.0.32
-pywin32==312
 PyYAML==6.0.3
 realtime==2.31.0
 referencing==0.37.0
 regex==2026.7.19
 requests==2.34.2
-rich==14.3.4
 rpds-py==2026.6.3
 s3transfer==0.19.2
 six==1.17.0
-slack_bolt==1.30.0
-slack_sdk==3.43.0
 sniffio==1.3.1
-soupsieve==2.9.2
 sse-starlette==3.4.8
 starlette==1.6.0
 storage3==2.31.0
 strands-agents==1.52.0
-strands-agents-tools==0.8.6
 StrEnum==0.4.15
 supabase==2.31.0
 supabase-auth==2.31.0
 supabase-functions==2.31.0
-sympy==1.14.0
-tenacity==9.1.4
 tiktoken==0.14.0
 tokenizers==0.23.1
 tqdm==4.70.0
@@ -104,7 +103,6 @@ tzlocal==5.4.4
 urllib3==2.7.0
 uvicorn==0.52.3
 watchdog==6.0.0
-wcwidth==0.8.2
 websockets==15.0.1
 wrapt==2.3.0
 yarl==1.24.5

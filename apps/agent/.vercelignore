@@ -1,0 +1,9 @@
+# Never upload these from a CLI deploy. .env holds the service-role key and
+# must reach Vercel only as project environment variables; .venv is a
+# Windows virtualenv of several hundred megabytes that Linux cannot use.
+.env
+.venv/
+__pycache__/
+tests/
+db/
+scripts/
