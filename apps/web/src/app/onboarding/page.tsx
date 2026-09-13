@@ -5,6 +5,8 @@ import { OnboardingFlow } from "./onboarding-flow";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Set up" };
+
 /**
  * The front door. Unlike every other page this one must work with no
  * workspace at all -- that is the state it exists to resolve -- so it

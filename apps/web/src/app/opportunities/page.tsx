@@ -5,6 +5,8 @@ import { OpportunityList } from "./opportunity-list";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Opportunities" };
+
 const SOURCE_LABEL: Record<string, string> = {
   hacker_news: "hn",
   remotive: "remotive",

@@ -105,13 +105,11 @@ export type Profile = {
   portfolio: PortfolioItem[];
   payment_terms: string | null;
   timezone?: string | null;
-  /** Where their work actually lives. Read by the importer, except
-   *  LinkedIn, which blocks automated fetching and is stored only. */
+  /** Where their work lives. Both are read by the importer, which fills
+   *  `positioning` and `portfolio` from them -- neither is typed by hand. */
   links?: {
     website?: string;
     github?: string;
-    linkedin?: string;
-    resume_text?: string;
   };
 };
 
@@ -189,6 +187,9 @@ export type KickoffResult = {
   scored: { scored: number; failed: number };
   pitched: { opportunity_id: string; approval_id: string }[];
   pitch_errors: { opportunity_id: string; error: string }[];
+  /** A stage that didn't finish, by name ("links", "scoring",
+   *  "pitching"). The rest of the response is still real. */
+  errors?: Partial<Record<"links" | "scoring" | "pitching", string>>;
 };
 
 export type QuoteLineItem = {
@@ -523,7 +524,7 @@ export const api = {
    *  Saves nothing -- the caller shows it back for confirmation. */
   importProfile: (
     account: string,
-    body: { github?: string | null; website?: string | null; linkedin?: string | null; resume_text?: string | null },
+    body: { github?: string | null; website?: string | null },
   ) =>
     apiFetch<ImportedProfileResult>(`/profile/import`, account, {
       method: "POST",

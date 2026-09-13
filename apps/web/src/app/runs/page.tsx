@@ -8,6 +8,8 @@ import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Runs" };
+
 const STATUS_TONE: Record<string, string> = {
   running: "var(--warn)",
   completed: "var(--ok)",

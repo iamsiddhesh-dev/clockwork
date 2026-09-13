@@ -5,6 +5,8 @@ import { ApprovalInbox } from "./approval-inbox";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Approvals" };
+
 export default async function ApprovalsPage() {
   const account = await requireAccount();
   const approvals = await api.listApprovals(account).catch(() => null);

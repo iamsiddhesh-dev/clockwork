@@ -183,7 +183,11 @@ try {
   var reduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var seen = sessionStorage.getItem('${PRELOAD_KEY}') === '1';
-  if (onboarding && !reduced && !seen) {
+  // A page opened in a background tab is not being watched, and browsers
+  // do not run CSS animations there -- so the intro would sit frozen at
+  // its first frame with the form hidden underneath. Skip it.
+  var visible = document.visibilityState === 'visible';
+  if (onboarding && visible && !reduced && !seen) {
     document.documentElement.dataset.preload = 'on';
     sessionStorage.setItem('${PRELOAD_KEY}', '1');
   }

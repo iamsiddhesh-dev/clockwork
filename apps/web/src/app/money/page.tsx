@@ -5,6 +5,8 @@ import { MoneyBoard } from "./money-board";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Money" };
+
 export default async function MoneyPage() {
   const account = await requireAccount();
 

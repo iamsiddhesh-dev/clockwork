@@ -4,6 +4,8 @@ import { IntakeForm } from "./intake-form";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Start a project" };
+
 type Freelancer = { name: string; title: string | null; positioning: string | null };
 
 /**

@@ -7,6 +7,8 @@ import { Card, compactMoney } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Conversation" };
+
 const SCORE_TONE: Record<string, string> = {
   hot: "var(--bad)",
   warm: "var(--warn)",

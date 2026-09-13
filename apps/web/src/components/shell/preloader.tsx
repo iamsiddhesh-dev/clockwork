@@ -4,13 +4,25 @@ import { useEffect } from "react";
 import { Logo } from "./icons";
 
 /**
- * Only a safety net. The panel normally goes when its own exit animation
- * ends, so the CSS owns the timing on its own. This exists purely so a
- * browser that never fires `animationend` -- a backgrounded tab, a
- * cancelled animation -- cannot leave a full-screen panel sitting over
- * the app forever.
+ * When the intro is over, counted from the start of the page load, not
+ * from when this component happens to mount.
+ *
+ * A hard backstop, enforced here rather than left to the CSS. The
+ * animations are free to not run at all -- browsers suspend them in
+ * background tabs and under power-saving throttles -- and the intro used
+ * to rely on them, which is how a visitor ended up staring at the logo
+ * with the form hidden beneath it.
+ *
+ * Normally the intro ends earlier, the moment the slide-out animation
+ * reports finishing (about 5s after first paint). This only fires when
+ * that never happens. It sits a little past 5s rather than on it because
+ * animations start at first paint, which on a real network lands a few
+ * hundred milliseconds after the page's clock starts -- cutting at 5.0s
+ * would chop the end off a slide that was running perfectly well.
+ *
+ * Keep in step with the preloader timeline in globals.css.
  */
-const FALLBACK_MS = 9000;
+const INTRO_ENDS_AT_MS = 6500;
 
 /**
  * The first thing anyone sees: the mark travels in from the left, the
@@ -27,12 +39,8 @@ const FALLBACK_MS = 9000;
  * itself on from a React effect, which runs after the first paint -- so
  * the form was visible for a frame before the panel dropped over it.
  *
- * **The CSS owns the timing.** This waits for the exit animation to end
- * rather than counting the same milliseconds a second time in
- * JavaScript. Two hardcoded timings in two files is a bug waiting to
- * happen, and it duly happened: retiming the animation left a
- * `setTimeout` behind that tore the panel away while it was still
- * opening.
+ * **The deadline is JavaScript's, the motion is CSS's.** See
+ * INTRO_ENDS_AT_MS for why the exit no longer waits on an animation.
  */
 export function Preloader() {
   useEffect(() => {
@@ -43,39 +51,37 @@ export function Preloader() {
       delete root.dataset.preload;
     };
 
-    // `animationend` BUBBLES, so a listener also hears the mark and the
-    // wordmark finishing -- and a plain `{ once: true }` handler fired on
-    // the first of those, tearing the panel away a beat after the logo
-    // appeared. Match the exit by name.
+    // The normal ending. `animationend` bubbles, so this also hears the
+    // mark and wordmark finishing; match the exit by name. Listening on
+    // the document rather than the panel means a panel node swapped out
+    // by a re-render still gets heard.
     const onEnd = (event: AnimationEvent) => {
       if (event.animationName === "cw-preloader-out") finish();
     };
-
-    // On the document, not on the panel node. A navigation followed by
-    // `router.refresh()` can swap that node out mid-animation: the old
-    // one's animation is cancelled and never reports ending, and a
-    // listener bound to it waits forever on an element no longer on the
-    // page. The document outlives every node, and bubbling brings the
-    // replacement's event to it.
     document.addEventListener("animationend", onEnd);
-    window.setTimeout(finish, FALLBACK_MS);
+
+    // The backstop. Measured against the page's own clock, so a slow
+    // script download does not push it back.
+    const remaining = Math.max(0, INTRO_ENDS_AT_MS - performance.now());
+    window.setTimeout(finish, remaining);
+
+    // Hidden mid-intro: the animation stops advancing, so coming back to
+    // the tab would show the logo frozen where it was left. End it now,
+    // and the app is simply there on return.
+    const onHide = () => {
+      if (document.visibilityState === "hidden") finish();
+    };
+    document.addEventListener("visibilitychange", onHide);
 
     return () => {
       document.removeEventListener("animationend", onEnd);
-      // Neither the attribute NOR the fallback timer is cleared here.
-      //
-      // The attribute: React StrictMode runs effects mount -> cleanup ->
-      // mount in development, so clearing it wiped `data-preload`
-      // milliseconds after the first mount and the intro never played.
-      //
-      // The timer: it used to be cancelled here, which made it a safety
-      // net that disappeared at exactly the moment it was needed. Any
-      // remount mid-intro cancelled it, and if the animation was also
-      // cancelled, nothing was left to lift a full-screen panel off the
-      // page -- which is how onboarding froze behind the logo. `finish`
-      // only deletes an attribute, so letting a stale timer run is
-      // harmless, and now the panel is gone within nine seconds no matter
-      // what happened to the component in between.
+      document.removeEventListener("visibilitychange", onHide);
+      // Neither the attribute nor the timer is cleared here. React
+      // StrictMode runs effects mount -> cleanup -> mount in development,
+      // so clearing the attribute wiped it before the intro ever played;
+      // and a timer cancelled on cleanup is a deadline that disappears on
+      // any remount. `finish` only deletes an attribute, so a stale timer
+      // running later is harmless.
     };
   }, []);
 

@@ -654,34 +654,58 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
     is rate-limited, and the response says exactly what happened at each
     step rather than collapsing to a single success/failure.
     """
+    # Stage failures are recorded here and returned, not raised. This used
+    # to promise independent stages while only the pitch step kept it: a
+    # failure while checking links or scoring discarded everything
+    # already done -- including the postings it had just fetched -- and
+    # answered a bare 500, which left a new user on a dead-end error screen
+    # with no idea which part broke. The full traceback goes to the log;
+    # the response names the exception so the screen can say something.
+    errors: dict[str, str] = {}
+
+    def failed(stage: str, exc: Exception) -> None:
+        logger.exception("kickoff stage %r failed for %s", stage, user_id)
+        errors[stage] = f"{type(exc).__name__}: {exc}"[:300]
+
     with run_context(user_id=user_id, run_id=None):
         sync = sync_sources(user_id)
 
         # Check the links before spending model calls on them. Scoring a
         # posting that was filled last month costs real tokens to produce
         # a number nobody should act on.
-        links = verify_opportunities(user_id, limit=req.score_limit * 3)
+        try:
+            links = verify_opportunities(user_id, limit=req.score_limit * 3)
+        except Exception as exc:
+            failed("links", exc)
+            links = {"checked": 0, "live": 0, "closed": 0, "gone": 0, "unreachable": 0, "skipped": 0}
 
         try:
             scoring = score_unscored(limit=req.score_limit)
         except ProfileMissingError as exc:
             raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            failed("scoring", exc)
+            scoring = {"scored": 0, "failed": 0}
 
         # Pitch only genuinely good matches. Drafting outreach for a
         # 20/100 lead would be the exact generic spam this is supposed to
         # replace, and it costs a model call to produce something the
         # human should reject anyway.
-        best = (
-            get_client()
-            .table("opportunity")
-            .select("id,fit_score")
-            .eq("user_id", user_id)
-            .eq("status", "scored")
-            .gte("fit_score", 60)
-            .order("fit_score", desc=True)
-            .limit(req.pitch_top)
-            .execute()
-        ).data or []
+        try:
+            best = (
+                get_client()
+                .table("opportunity")
+                .select("id,fit_score")
+                .eq("user_id", user_id)
+                .eq("status", "scored")
+                .gte("fit_score", 60)
+                .order("fit_score", desc=True)
+                .limit(req.pitch_top)
+                .execute()
+            ).data or []
+        except Exception as exc:
+            failed("pitching", exc)
+            best = []
 
         pitched, pitch_errors = [], []
         for row in best:
@@ -699,6 +723,7 @@ def kickoff(req: KickoffRequest, user_id: str = Depends(get_current_user_id)) ->
             for p in pitched
         ],
         "pitch_errors": pitch_errors,
+        "errors": errors,
     }
 
 

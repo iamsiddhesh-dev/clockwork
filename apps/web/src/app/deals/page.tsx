@@ -8,6 +8,8 @@ import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Pipeline" };
+
 const STAGE_ORDER = ["new", "qualified", "quoted", "won", "lost"] as const;
 
 const SCORE_TONE: Record<string, string> = {

@@ -152,9 +152,9 @@ Then open `http://localhost:3000`. The onboarding form is the front door: fillin
 
 Your work is kept until you delete it. The email you onboard with is also how you get back: **Log out** in Settings forgets this browser, `/signin` takes that email and reopens the same workspace, and **Delete this account** removes the workspace and everything in it for good. That last one is a real delete — every table cascades off the account row, and nothing is soft-deleted or kept behind the scenes.
 
-Onboarding asks for three things and reads the rest. Who you are, what you charge, and where your work lives — then it fetches your GitHub and your site, extracts your skills and past results, and shows them back for you to edit. It does **not** ask you to type your own case studies into a form, because nobody enjoys that and no client asks for it either.
+Onboarding asks for three things and reads the rest: who you are, what you charge, and where your work lives. Required fields are starred. The last step takes a **GitHub** link, a **portfolio** link, or both — and when you press *Find me work* it reads them (GitHub through the public API, the site over HTTP) to fill in your summary, extra skills and the past results pitches quote. Nobody is asked to type their own case studies into a form, because nobody enjoys that and no client asks for it either.
 
-What it can actually read, stated plainly: **GitHub** through the public API, **a portfolio site** over HTTP, **a CV** as pasted text. **LinkedIn it cannot** — LinkedIn blocks automated fetching, so the link is stored for clients and the UI says it isn't scanned rather than silently returning nothing.
+LinkedIn and CV upload are deliberately absent. LinkedIn blocks automated reading, so a LinkedIn field would collect a link the agent can never use; and a CV pasted as text is a worse copy of what GitHub and a portfolio already show. Optional refinements — years of experience, hours a week, a minimum project size — live in Settings, marked optional.
 
 To get a populated workspace without waiting on three job boards and a model provider:
 

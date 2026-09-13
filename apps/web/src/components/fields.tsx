@@ -19,6 +19,7 @@ export function Field({
   label,
   hint,
   required,
+  optional,
   error,
   children,
   htmlFor,
@@ -26,7 +27,11 @@ export function Field({
   label: string;
   /** Only when it adds something the label doesn't. */
   hint?: React.ReactNode;
+  /** Marked with an asterisk. */
   required?: boolean;
+  /** Marked "Optional", so a field that is neither starred nor labelled
+   *  never leaves someone guessing whether they can skip it. */
+  optional?: boolean;
   error?: string | null;
   children: React.ReactNode;
   htmlFor?: string;
@@ -39,6 +44,11 @@ export function Field({
       >
         {label}
         {required ? <span style={{ color: "var(--orange-ink)" }}> *</span> : null}
+        {optional ? (
+          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 400, color: "var(--quiet)" }}>
+            Optional
+          </span>
+        ) : null}
       </label>
       {hint ? (
         <div style={{ marginTop: 3, fontSize: 12, color: "var(--quiet)", lineHeight: 1.5 }}>

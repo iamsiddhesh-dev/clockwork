@@ -5,6 +5,8 @@ import { SearchView } from "./search-view";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Search" };
+
 export default async function SearchPage() {
   // Gate on the workspace even though the view fetches client-side --
   // otherwise a cookie-less visitor gets an empty search box instead of

@@ -6,6 +6,8 @@ import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Overview" };
+
 function timeOnly(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }

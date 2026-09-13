@@ -8,6 +8,8 @@ import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Threads" };
+
 export default async function ThreadsPage({ searchParams }: PageProps<"/threads">) {
   const account = await requireAccount();
   const page = pageFrom(await searchParams);

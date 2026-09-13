@@ -11,6 +11,7 @@ import {
   EMPTY_PROFILE,
   ProfileFields,
   STEPS,
+  readLinks,
   stepErrors,
   usablePortfolio,
   type ProfileDraft,
@@ -36,7 +37,7 @@ const HEADINGS: Record<StepKey, { title: string; note?: string }> = {
   },
   proof: {
     title: "Where's your work?",
-    note: "Add a link and it reads the rest for you.",
+    note: "Clockwork reads these to find the results your pitches cite.",
   },
 };
 
@@ -90,7 +91,13 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
     setError(null);
     try {
       const account = await ensureAccount();
-      await api.saveProfile(account, { ...form, portfolio: usablePortfolio(form) });
+      // Read their GitHub and portfolio first, so the one-line summary and
+      // past results the agent scores and pitches with come from their
+      // real work rather than an empty profile. `readLinks` never throws:
+      // an unreadable link must not stop someone finishing onboarding.
+      const { form: enriched } = await readLinks(account, form);
+      setForm(enriched);
+      await api.saveProfile(account, { ...enriched, portfolio: usablePortfolio(enriched) });
       setProfileSaved(true);
       setResult(await api.kickoff(account, 10, 1));
       setStage("done");
@@ -118,7 +125,13 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
         )}
 
         <div style={{ marginTop: 26 }}>
-          <ProfileFields form={form} setForm={setForm} only={step.key} showErrors={touched} />
+          <ProfileFields
+            form={form}
+            setForm={setForm}
+            only={step.key}
+            showErrors={touched}
+            variant="onboarding"
+          />
         </div>
 
         <div className="cw-row" style={{ marginTop: 28 }}>
@@ -159,10 +172,10 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
       <Frame>
         <div className="cw-label">Working</div>
         <h1 className="cw-h1" style={{ marginTop: 10 }}>
-          Reading the boards.
+          Reading your work, then the boards.
         </h1>
         <p style={{ margin: "10px 0 0", fontSize: 14, color: "var(--dim)" }}>
-          Sourcing, checking each link is live, and scoring against your profile. About a minute.
+          Finding leads, checking each is still open, and scoring them against you. About a minute.
         </p>
         <div
           style={{
@@ -242,7 +255,18 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
             }
           />
         )}
-        <Outcome title={`Scored ${scored} against your profile`} note="0–100, with the evidence" />
+        <Outcome
+          title={
+            result?.errors?.scoring ? "Scoring didn't finish" : `Scored ${scored} against your profile`
+          }
+          // A stage that failed says so, instead of reporting "Scored 0" as
+          // though every lead had been read and found wanting.
+          note={
+            result?.errors?.scoring
+              ? "Run it again from Opportunities — the leads are saved."
+              : "0–100, with the evidence"
+          }
+        />
         <Outcome
           highlight={pitched > 0}
           title={pitched > 0 ? `Drafted ${pitched} pitch` : "No pitch yet"}

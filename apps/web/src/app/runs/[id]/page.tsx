@@ -8,6 +8,8 @@ import { RunTrace } from "./run-trace";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Run trace" };
+
 export default async function RunDetailPage(props: PageProps<"/runs/[id]">) {
   const { id } = await props.params;
   const account = await requireAccount();

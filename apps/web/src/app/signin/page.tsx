@@ -6,6 +6,8 @@ import { SignInForm } from "./signin-form";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Sign in" };
+
 /**
  * The way back to a workspace whose cookie is gone.
  *

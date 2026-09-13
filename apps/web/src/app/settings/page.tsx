@@ -5,6 +5,8 @@ import { SettingsView } from "./settings-view";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Settings" };
+
 export default async function SettingsPage() {
   const account = await requireAccount();
   const [profile, summary, record] = await Promise.all([

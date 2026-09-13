@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api, type PortfolioItem, type Profile } from "@/lib/api";
+import { api, type ImportedProfileResult, type PortfolioItem, type Profile } from "@/lib/api";
 import { ensureAccount } from "@/lib/account";
-import { Combobox, Field, NumberField, TagInput, TextField, useFieldId } from "@/components/fields";
+import { Combobox, Field, NumberField, TagInput, useFieldId } from "@/components/fields";
 import {
   SKILL_SUGGESTIONS,
   TITLE_OPTIONS,
@@ -32,11 +32,9 @@ export const EMPTY_PROFILE: ProfileDraft = {
   links: {},
 };
 
-/** One line, enforced. The old field asked for a 100-character minimum
- *  paragraph and then accepted 523 characters against a counter that
- *  said 500 — a field that displays a limit it does not enforce is
- *  simply lying to the person filling it in. */
-export const HEADLINE_MAX = 160;
+/** Most skills anyone should list. Past this, scoring stops getting any
+ *  sharper and the profile starts reading like keyword stuffing. */
+const MAX_SKILLS = 20;
 
 export const STEPS = [
   { key: "you", label: "You" },
@@ -46,12 +44,17 @@ export const STEPS = [
 
 export type StepKey = (typeof STEPS)[number]["key"];
 
+/** A GitHub handle, or any github.com link -- the importer takes the
+ *  first path segment either way. */
+const GITHUB = /^(@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?|(https?:\/\/)?(www\.)?github\.com\/\S+)$/i;
+/** Something with a dot and no spaces. Deliberately loose: portfolios
+ *  live on every kind of domain, and the importer reports what it
+ *  actually managed to read. */
+const WEBSITE = /^(https?:\/\/)?[^\s/.]+\.[^\s]+$/i;
+
 export function stepErrors(form: ProfileDraft): Record<StepKey, string | null> {
-  const headline = (form.positioning ?? "").trim();
-  const links = form.links ?? {};
-  const hasSource =
-    Boolean(links.website?.trim() || links.github?.trim() || links.resume_text?.trim()) ||
-    form.portfolio.some((p) => p.summary.trim());
+  const github = form.links?.github?.trim() ?? "";
+  const website = form.links?.website?.trim() ?? "";
 
   return {
     you: !form.name.trim()
@@ -67,22 +70,83 @@ export function stepErrors(form: ProfileDraft): Record<StepKey, string | null> {
     work:
       form.skills.length === 0
         ? "Add at least one skill."
-        : !headline
-          ? "One line on what you do."
-          : headline.length > HEADLINE_MAX
-            ? `${headline.length - HEADLINE_MAX} characters over.`
-            : !form.rates?.hourly || Number(form.rates.hourly) <= 0
-              ? "Add your rate."
-              : null,
+        : !form.rates?.hourly || Number(form.rates.hourly) <= 0
+          ? "Add your rate."
+          : null,
 
-    proof: !hasSource
-      ? "Add a link, paste your CV, or write one past result."
-      : null,
+    // At least one, because this is where every pitch gets its evidence:
+    // the agent quotes the results it reads here, and with nothing to read
+    // it can only say generic things -- the spam this product replaces.
+    proof: !github && !website
+      ? "Add your GitHub or your portfolio link."
+      : github && !GITHUB.test(github)
+        ? "That GitHub link doesn't look right."
+        : website && !WEBSITE.test(website)
+          ? "That portfolio link doesn't look right."
+          : null,
   };
 }
 
 export function usablePortfolio(form: ProfileDraft): PortfolioItem[] {
   return form.portfolio.filter((p) => p.summary.trim());
+}
+
+/**
+ * Fold what the importer read into the profile.
+ *
+ * What the person chose themselves wins: their title stays, and their
+ * skills come first. The one-line summary and past results have no
+ * field of their own any more -- they are read from GitHub and the
+ * portfolio, not typed -- so a fresh read replaces them rather than
+ * piling duplicates onto the last one.
+ */
+export function mergeImported(
+  form: ProfileDraft,
+  imported: ImportedProfileResult["profile"],
+): ProfileDraft {
+  if (!imported) return form;
+
+  const seen = new Set(form.skills.map((s) => s.toLowerCase()));
+  const extraSkills = imported.skills.filter((s) => {
+    const key = s.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const highlights = imported.highlights.filter((h) => h.summary.trim());
+
+  return {
+    ...form,
+    title: form.title?.trim() ? form.title : (imported.title ?? form.title),
+    positioning: imported.headline?.trim() || form.positioning,
+    skills: [...form.skills, ...extraSkills].slice(0, MAX_SKILLS),
+    portfolio: highlights.length ? highlights : form.portfolio,
+  };
+}
+
+/** Read the person's GitHub and portfolio. Never throws: a board that
+ *  can't be read or a model that's rate-limited should not stop anyone
+ *  finishing their profile, so a failure comes back as a note instead. */
+export async function readLinks(
+  account: string,
+  form: ProfileDraft,
+): Promise<{ form: ProfileDraft; note: string | null }> {
+  const github = form.links?.github?.trim() || null;
+  const website = form.links?.website?.trim() || null;
+  if (!github && !website) return { form, note: null };
+
+  try {
+    const result = await api.importProfile(account, { github, website });
+    const merged = mergeImported(form, result.profile);
+    const found = merged.portfolio.length;
+    const note = result.read.length
+      ? `Read ${result.read.join(" and ")}${found ? ` · ${found} result${found === 1 ? "" : "s"} found` : ""}.`
+      : result.skipped[0] ?? "Couldn't read those links.";
+    return { form: merged, note };
+  } catch (err) {
+    return { form, note: `Couldn't read your links: ${(err as Error).message}` };
+  }
 }
 
 /** Shown on the profile screen, not during onboarding. Nobody setting up
@@ -94,8 +158,14 @@ export function completeness(form: ProfileDraft) {
     { done: Boolean(form.availability_hours), gain: "hours a week filters out full-time roles" },
     { done: Boolean(form.min_project_budget), gain: "a minimum rejects underpaid work for you" },
     { done: form.skills.length >= 3, gain: "three or more skills rank leads far better than one" },
-    { done: usablePortfolio(form).length >= 2, gain: "a second past result gives pitches more to cite" },
-    { done: Boolean(links.github?.trim() || links.website?.trim()), gain: "a link keeps your profile current" },
+    {
+      done: Boolean(links.github?.trim() && links.website?.trim()),
+      gain: "both GitHub and a portfolio give pitches more real work to cite",
+    },
+    {
+      done: usablePortfolio(form).length > 0,
+      gain: "reading your links finds the results pitches quote",
+    },
   ];
   const done = checks.filter((c) => c.done).length;
   return {
@@ -111,16 +181,21 @@ export function ProfileFields({
   setForm,
   only,
   showErrors,
+  variant = "settings",
 }: {
   form: ProfileDraft;
   setForm: (next: ProfileDraft) => void;
   only?: StepKey;
   showErrors?: boolean;
+  /** Onboarding asks for what the agent cannot work without. Everything
+   *  that only sharpens the results lives in Settings, marked optional. */
+  variant?: "onboarding" | "settings";
 }) {
   const set = <K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) =>
     setForm({ ...form, [key]: value });
 
   const show = (step: StepKey) => !only || only === step;
+  const inSettings = variant === "settings";
   const currency = String(form.rates?.currency ?? "USD");
   const symbol = currencySymbol(currency);
   const zones = useMemo(() => timeZoneOptions(), []);
@@ -191,15 +266,7 @@ export function ProfileFields({
               onChange={(v) => set("skills", v)}
               suggestions={SKILL_SUGGESTIONS}
               placeholder="Type a skill, press Enter"
-            />
-          </Field>
-
-          <Field label="What you do, in one line" required>
-            <TextField
-              value={form.positioning ?? ""}
-              onChange={(v) => set("positioning", v)}
-              maxLength={HEADLINE_MAX}
-              placeholder="I rebuild billing systems for B2B SaaS teams."
+              max={MAX_SKILLS}
             />
           </Field>
 
@@ -215,7 +282,7 @@ export function ProfileFields({
               />
             </Field>
 
-            <Field label="Currency">
+            <Field label="Currency" required>
               <Combobox
                 strict
                 value={currency}
@@ -225,254 +292,133 @@ export function ProfileFields({
             </Field>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
-            <Field label="Years of experience">
-              <NumberField
-                value={form.years_experience}
-                onChange={(v) => set("years_experience", v)}
-                min={0}
-                max={60}
-                suffix="years"
-                placeholder="8"
-              />
-            </Field>
+          {inSettings && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+                <Field label="Years of experience" optional>
+                  <NumberField
+                    value={form.years_experience}
+                    onChange={(v) => set("years_experience", v)}
+                    min={0}
+                    max={60}
+                    suffix="years"
+                    placeholder="8"
+                  />
+                </Field>
 
-            <Field label="Hours a week you're free">
-              <NumberField
-                value={form.availability_hours}
-                onChange={(v) => set("availability_hours", v)}
-                min={1}
-                max={168}
-                suffix="hrs"
-                placeholder="25"
-              />
-            </Field>
-          </div>
+                <Field label="Hours a week you're free" optional>
+                  <NumberField
+                    value={form.availability_hours}
+                    onChange={(v) => set("availability_hours", v)}
+                    min={1}
+                    max={168}
+                    suffix="hrs"
+                    placeholder="25"
+                  />
+                </Field>
+              </div>
 
-          <Field label="Ignore projects smaller than" hint="Leave blank to see everything.">
-            <NumberField
-              value={form.min_project_budget}
-              onChange={(v) => set("min_project_budget", v)}
-              prefix={symbol}
-              min={0}
-              placeholder="3000"
-            />
-          </Field>
+              <Field label="Ignore projects smaller than" optional hint="Leave blank to see everything.">
+                <NumberField
+                  value={form.min_project_budget}
+                  onChange={(v) => set("min_project_budget", v)}
+                  prefix={symbol}
+                  min={0}
+                  placeholder="3000"
+                />
+              </Field>
+            </>
+          )}
         </>
       )}
 
-      {show("proof") && <ProofFields form={form} setForm={setForm} showErrors={showErrors} />}
+      {show("proof") && (
+        <ProofFields form={form} setForm={setForm} showErrors={showErrors} canRead={inSettings} />
+      )}
     </div>
   );
 }
 
-// ── step 3: read it from their own material ───────────────────────────
+// ── step 3: where their work lives ────────────────────────────────────
 
 function ProofFields({
   form,
   setForm,
   showErrors,
+  canRead,
 }: {
   form: ProfileDraft;
   setForm: (next: ProfileDraft) => void;
   showErrors?: boolean;
+  /** Settings offers a "read again" button. Onboarding doesn't need one:
+   *  it reads the links itself when the person presses Find me work. */
+  canRead: boolean;
 }) {
   const [busy, setBusy] = useState(false);
-  const [report, setReport] = useState<{ read: string[]; skipped: string[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pastingCv, setPastingCv] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   const links = form.links ?? {};
-  const setLink = (key: string, value: string) =>
+  const setLink = (key: "github" | "website", value: string) =>
     setForm({ ...form, links: { ...links, [key]: value } });
 
-  async function runImport() {
+  const githubId = useFieldId("github");
+  const websiteId = useFieldId("website");
+  const error = showErrors ? stepErrors(form).proof : null;
+
+  async function readAgain() {
     setBusy(true);
-    setError(null);
-    setReport(null);
-    try {
-      const account = await ensureAccount();
-      const result = await api.importProfile(account, {
-        github: links.github ?? null,
-        website: links.website ?? null,
-        linkedin: links.linkedin ?? null,
-        resume_text: links.resume_text ?? null,
-      });
-      setReport({ read: result.read, skipped: result.skipped });
-
-      if (result.profile) {
-        const p = result.profile;
-        setForm({
-          ...form,
-          // Only fill what is still blank -- what the person typed
-          // themselves always wins over what a model guessed.
-          title: form.title?.trim() ? form.title : (p.title ?? form.title),
-          positioning: form.positioning?.trim()
-            ? form.positioning
-            : (p.headline ?? form.positioning),
-          skills: form.skills.length
-            ? form.skills
-            : p.skills.slice(0, 12),
-          portfolio: [...form.portfolio, ...p.highlights.filter((h) => h.summary.trim())],
-          links: { ...links },
-        });
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    setNote(null);
+    const account = await ensureAccount();
+    const { form: next, note: message } = await readLinks(account, form);
+    setForm(next);
+    setNote(message);
+    setBusy(false);
   }
-
-  const canImport =
-    Boolean(links.github?.trim() || links.website?.trim() || links.resume_text?.trim()) && !busy;
 
   return (
     <>
-      <Field label="Portfolio or website">
-        <input
-          className="cw-input"
-          value={links.website ?? ""}
-          onChange={(e) => setLink("website", e.target.value)}
-          placeholder="maya.dev"
-        />
-      </Field>
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--quiet)" }}>
+        Add at least one<span style={{ color: "var(--orange-ink)" }}> *</span>
+      </p>
 
-      <Field label="GitHub">
+      <Field label="GitHub" htmlFor={githubId}>
         <input
+          id={githubId}
           className="cw-input"
           value={links.github ?? ""}
           onChange={(e) => setLink("github", e.target.value)}
           placeholder="github.com/maya"
+          autoComplete="url"
         />
       </Field>
 
-      <Field label="LinkedIn" hint="Stored, not scanned.">
+      <Field label="Portfolio" htmlFor={websiteId}>
         <input
+          id={websiteId}
           className="cw-input"
-          value={links.linkedin ?? ""}
-          onChange={(e) => setLink("linkedin", e.target.value)}
-          placeholder="linkedin.com/in/maya"
+          value={links.website ?? ""}
+          onChange={(e) => setLink("website", e.target.value)}
+          placeholder="maya.dev"
+          autoComplete="url"
         />
       </Field>
 
-      {pastingCv || links.resume_text ? (
-        <Field label="Your CV">
-          <textarea
-            className="cw-input"
-            style={{ minHeight: 140, resize: "vertical" }}
-            value={links.resume_text ?? ""}
-            onChange={(e) => setLink("resume_text", e.target.value)}
-            placeholder="Paste the text of your CV."
-          />
-        </Field>
-      ) : (
-        <button type="button" className="cw-btn cw-btn-sm" onClick={() => setPastingCv(true)}>
-          Paste a CV instead
-        </button>
-      )}
+      {error && <p style={{ margin: 0, fontSize: 12.5, color: "var(--bad)" }}>{error}</p>}
 
-      <div className="cw-row">
-        <button type="button" className="cw-btn cw-btn-primary" disabled={!canImport} onClick={runImport}>
-          {busy ? "Reading…" : "Read my work"}
-        </button>
-        {!canImport && !busy && (
-          <span style={{ fontSize: 12.5, color: "var(--quiet)" }}>
-            Add a link or paste a CV first.
-          </span>
-        )}
-        {error && <span style={{ fontSize: 12.5, color: "var(--bad)" }}>{error}</span>}
-      </div>
-
-      {report && (
-        <div className="cw-card-sm" style={{ padding: 14 }}>
-          {report.read.length > 0 && (
-            <p style={{ margin: 0, fontSize: 13, color: "var(--ok)" }}>
-              Read {report.read.join(", ")}.
-            </p>
-          )}
-          {report.skipped.map((line) => (
-            <p key={line} style={{ margin: "6px 0 0", fontSize: 12.5, color: "var(--quiet)" }}>
-              {line}
-            </p>
-          ))}
+      {canRead && (
+        <div className="cw-row">
+          <button
+            type="button"
+            className="cw-btn"
+            disabled={busy || Boolean(stepErrors(form).proof)}
+            onClick={readAgain}
+          >
+            {busy ? "Reading…" : "Read my work again"}
+          </button>
+          {note && <span style={{ fontSize: 12.5, color: "var(--dim)" }}>{note}</span>}
         </div>
       )}
-
-      <PortfolioEditor form={form} setForm={setForm} showErrors={showErrors} />
     </>
-  );
-}
-
-function PortfolioEditor({
-  form,
-  setForm,
-  showErrors,
-}: {
-  form: ProfileDraft;
-  setForm: (next: ProfileDraft) => void;
-  showErrors?: boolean;
-}) {
-  const update = (index: number, patch: Partial<PortfolioItem>) =>
-    setForm({
-      ...form,
-      portfolio: form.portfolio.map((item, i) => (i === index ? { ...item, ...patch } : item)),
-    });
-
-  return (
-    <div>
-      <div style={{ fontSize: 13.5, fontWeight: 600 }}>Past results</div>
-      <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--quiet)" }}>
-        Pitches quote these. Keep the numbers.
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-        {form.portfolio.map((item, index) => (
-          <div key={index} className="cw-card-sm" style={{ padding: 12 }}>
-            <input
-              className="cw-input"
-              value={item.title}
-              onChange={(e) => update(index, { title: e.target.value })}
-              placeholder="Stripe Billing migration"
-            />
-            <textarea
-              className="cw-input"
-              style={{ marginTop: 8, minHeight: 62, resize: "vertical" }}
-              value={item.summary}
-              onChange={(e) => update(index, { summary: e.target.value })}
-              placeholder="Cut failed-payment churn by 40%."
-            />
-            <button
-              type="button"
-              className="cw-btn cw-btn-sm cw-btn-quiet"
-              style={{ marginTop: 6 }}
-              onClick={() =>
-                setForm({ ...form, portfolio: form.portfolio.filter((_, i) => i !== index) })
-              }
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <button
-        type="button"
-        className="cw-btn cw-btn-sm"
-        style={{ marginTop: 12 }}
-        onClick={() =>
-          setForm({ ...form, portfolio: [...form.portfolio, { title: "", summary: "", tags: [] }] })
-        }
-      >
-        Add one manually
-      </button>
-
-      {showErrors && form.portfolio.length === 0 && (
-        <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--quiet)" }}>
-          Nothing yet. A link above is the quickest way to fill this in.
-        </p>
-      )}
-    </div>
   );
 }
 
@@ -515,7 +461,6 @@ export function ProfileForm({
     ...(initial ?? {}),
   }));
 
-  // After mount, not during render -- see the note in onboarding-flow.
   // The browser's zone is only knowable in the browser. Seeding it in
   // the initial state made the server render "UTC" into an input the
   // client then rendered as "Asia/Calcutta", which is the hydration
