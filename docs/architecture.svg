@@ -1,10 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 832" width="1020" height="832" role="img" aria-label="Clockwork architecture. Two triggers — a public intake form and a time-based scheduler polling every 30 seconds — both call the single run_agent entry point. run_agent builds a Strands agent whose model comes from a per-role router: an orchestrator model for tool choice, a smaller writer model for client-facing prose, and the same small model for extraction. The agent calls twelve typed tools that read and write Supabase Postgres; source adapters for Hacker News, Remotive and RemoteOK populate the opportunity table. Strands lifecycle hooks write every tool call and its cost to the agent_event audit trail. Approval-gated tools cannot send: they write a pending approval row, a human approves it in the Approval Inbox, and only then does the executor perform the real side effect. The money tail runs quote, then human acceptance, then invoice, then an escalating payment chase, then human confirmation of payment; every agent step in it is approval-gated, quote arithmetic is computed in Python rather than by the model, and no step can move money.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 870" width="1020" height="870" role="img" aria-label="Clockwork architecture. Three triggers wake the Strands agent through run_agent: a client writing in through the public intake form, the freelancer pasting a client's reply into a conversation, and a scheduler tick that runs every 30 seconds locally and every 5 minutes on Vercel through a GitHub Action. The freelancer's own buttons (setup, find leads, score, pitch, quote, invoice, chase) call the same tool code directly without the agent loop, and each is still recorded as a run. Job feeds from Hacker News, Remotive and RemoteOK, and the freelancer's GitHub and portfolio site, are read by those buttons. The Strands agent has 12 typed tools, Pydantic structured output, lifecycle hooks and a retry for rate-limited model calls. Models are routed by role on Groq through LiteLLM: orchestrator and reader on gpt-oss-120b, writer and extractor on gpt-oss-20b. Everything is stored in Supabase Postgres, with every step, tool call, token count and cost in agent_event and token_ledger, replayed in the Run Trace. Approval-gated tools cannot send: they write a pending approval row, the freelancer approves in the Approval Inbox, and only then does the executor record the action as sent. No email is transmitted. The money tail runs quote, human acceptance, invoice, an escalating payment chase, and human confirmation of payment; totals are computed in Python and no step can move money. A virtual clock lets the demo advance days ahead.">
   <style>
     .bg    { fill: #ffffff; }
     .box   { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
     .box-accent { fill: #fff8e6; stroke: #d4a72c; stroke-width: 2; }
     .box-live   { fill: #eaf6ec; stroke: #4a9a5e; stroke-width: 2; }
-    .box-dead   { fill: #f6f8fa; stroke: #b0b7be; stroke-width: 1.5; stroke-dasharray: 5 4; }
     .box-gate   { fill: #fdf0ee; stroke: #c4664d; stroke-width: 2; }
     .t       { fill: #1f2328; font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
     .title   { font-size: 14px; font-weight: 600; }
@@ -14,21 +13,18 @@
     .hdr     { font-size: 11px; font-weight: 700; fill: #59636e; letter-spacing: .08em; }
     .line    { stroke: #8c959f; stroke-width: 1.6; fill: none; }
     .line-gate { stroke: #c4664d; stroke-width: 2; fill: none; }
-    .line-dead { stroke: #b0b7be; stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
-    .dead-t  { fill: #8c959f; }
+    .rule    { stroke: #b0b7be; stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
 
     @media (prefers-color-scheme: dark) {
       .bg    { fill: #0d1117; }
       .box   { fill: #161b22; stroke: #30363d; }
       .box-accent { fill: #2b2413; stroke: #d4a72c; }
       .box-live   { fill: #12261a; stroke: #4a9a5e; }
-      .box-dead   { fill: #161b22; stroke: #484f58; }
       .box-gate   { fill: #2b1a16; stroke: #c4664d; }
       .t     { fill: #e6edf3; }
       .sub, .tiny, .lbl, .hdr { fill: #8b949e; }
       .line  { stroke: #6e7681; }
-      .line-dead { stroke: #484f58; }
-      .dead-t { fill: #6e7681; }
+      .rule  { stroke: #484f58; }
     }
   </style>
 
@@ -41,195 +37,221 @@
     </marker>
   </defs>
 
-  <rect class="bg" x="0" y="0" width="1020" height="832"/>
+  <rect class="bg" x="0" y="0" width="1020" height="870"/>
 
   <!-- ===== TRIGGERS ===== -->
-  <text class="t hdr" x="20" y="30">TRIGGERS</text>
+  <text class="t hdr" x="20" y="30">TRIGGERS — wake the agent</text>
 
   <g>
-    <rect class="box" x="20" y="44" width="170" height="54" rx="6"/>
-    <text class="t title" x="34" y="66">Public intake</text>
-    <text class="t sub" x="34" y="84">POST /intake — a lead arrives</text>
+    <rect class="box" x="20" y="44" width="190" height="48" rx="6"/>
+    <text class="t title" x="34" y="64">Client writes in</text>
+    <text class="t sub" x="34" y="81">public intake form</text>
   </g>
 
   <g>
-    <rect class="box-accent" x="20" y="116" width="170" height="60" rx="6"/>
-    <text class="t title" x="34" y="138">Scheduler tick</text>
-    <text class="t sub" x="34" y="155">every 30s, no human present</text>
-    <text class="t sub" x="34" y="169">drains tasks that are due</text>
+    <rect class="box" x="20" y="100" width="190" height="48" rx="6"/>
+    <text class="t title" x="34" y="120">You paste their reply</text>
+    <text class="t sub" x="34" y="137">on a conversation</text>
   </g>
 
-  <text class="t tiny" x="20" y="196">Both wake the agent the same way →</text>
+  <g>
+    <rect class="box-accent" x="20" y="156" width="190" height="64" rx="6"/>
+    <text class="t title" x="34" y="176">Scheduler tick</text>
+    <text class="t sub" x="34" y="193">every 30s locally; every 5 min</text>
+    <text class="t sub" x="34" y="207">on Vercel via a GitHub Action</text>
+  </g>
+  <text class="t tiny" x="20" y="236">a tick runs due tasks, no human present</text>
 
-  <!-- ===== SINGLE ENTRY POINT ===== -->
-  <path class="line" d="M190 71 L 228 71 L 228 155"/>
-  <path class="line" d="M190 146 L 228 146 L 228 155"/>
-  <path class="line" d="M228 155 L 242 155" marker-end="url(#a)"/>
+  <path class="line" d="M210 68 L 222 68 L 222 188 L 210 188"/>
+  <path class="line" d="M210 124 L 222 124"/>
+  <path class="line" d="M222 133 L 232 133" marker-end="url(#a)"/>
+
+  <!-- ===== INPUTS ===== -->
+  <text class="t hdr" x="20" y="276">INPUTS</text>
 
   <g>
-    <rect class="box" x="246" y="120" width="164" height="70" rx="6"/>
-    <text class="t title" x="328" y="148" text-anchor="middle">run_agent()</text>
-    <text class="t sub" x="328" y="166" text-anchor="middle">the single entry point</text>
-    <text class="t sub" x="328" y="180" text-anchor="middle">opens agent_run</text>
+    <rect class="box" x="20" y="288" width="196" height="64" rx="6"/>
+    <text class="t title" x="34" y="308">Job feeds</text>
+    <text class="t sub" x="34" y="325">Hacker News, Remotive, RemoteOK</text>
+    <text class="t sub" x="34" y="339">each link checked before scoring</text>
+  </g>
+
+  <g>
+    <rect class="box" x="20" y="360" width="190" height="50" rx="6"/>
+    <text class="t title" x="34" y="380">Your GitHub + site</text>
+    <text class="t sub" x="34" y="397">read once at setup</text>
+  </g>
+
+  <path class="line" d="M216 320 L 222 320 L 222 385 L 210 385"/>
+  <path class="line" d="M222 290 L 222 320"/>
+  <path class="line" d="M222 290 L 232 290" marker-end="url(#a)"/>
+
+  <!-- ===== ENTRY POINTS ===== -->
+  <g>
+    <rect class="box" x="236" y="96" width="190" height="74" rx="6"/>
+    <text class="t title" x="331" y="122" text-anchor="middle">run_agent()</text>
+    <text class="t sub" x="331" y="140" text-anchor="middle">the full agent loop</text>
+    <text class="t sub" x="331" y="155" text-anchor="middle">opens an agent_run</text>
+  </g>
+
+  <g>
+    <rect class="box-accent" x="236" y="224" width="190" height="96" rx="6"/>
+    <text class="t title" x="250" y="246">Your buttons</text>
+    <text class="t sub" x="250" y="264">set up, find leads, score,</text>
+    <text class="t sub" x="250" y="278">pitch, quote, invoice, chase</text>
+    <text class="t sub" x="250" y="296">call the tool code directly,</text>
+    <text class="t sub" x="250" y="310">no agent loop; logged as a run</text>
   </g>
 
   <!-- ===== STRANDS AGENT ===== -->
-  <path class="line" d="M410 155 L 462 155" marker-end="url(#a)"/>
+  <path class="line" d="M426 133 L 462 133" marker-end="url(#a)"/>
+  <path class="line" d="M426 272 L 446 272 L 446 176 L 462 176" marker-end="url(#a)"/>
+  <text class="t lbl" x="440" y="206" text-anchor="end">same tools</text>
 
   <g>
-    <rect class="box" x="466" y="112" width="200" height="86" rx="6"/>
-    <text class="t title" x="566" y="136" text-anchor="middle">Strands Agent</text>
-    <text class="t sub" x="566" y="155" text-anchor="middle">12 typed @tools</text>
-    <text class="t sub" x="566" y="170" text-anchor="middle">Pydantic structured output</text>
-    <text class="t sub" x="566" y="185" text-anchor="middle">lifecycle hooks</text>
+    <rect class="box" x="466" y="92" width="210" height="100" rx="6"/>
+    <text class="t title" x="571" y="116" text-anchor="middle">Strands Agent</text>
+    <text class="t sub" x="571" y="135" text-anchor="middle">12 typed @tools</text>
+    <text class="t sub" x="571" y="150" text-anchor="middle">Pydantic structured output</text>
+    <text class="t sub" x="571" y="165" text-anchor="middle">lifecycle hooks → audit trail</text>
+    <text class="t sub" x="571" y="180" text-anchor="middle">retries a rate-limited model call</text>
   </g>
 
   <!-- ===== MODEL ROUTER ===== -->
-  <text class="t hdr" x="466" y="222">MODEL ROUTER — one Role enum</text>
-  <path class="line" d="M566 230 L 566 250" marker-end="url(#a)"/>
+  <text class="t hdr" x="466" y="222">MODELS BY ROLE — Groq via LiteLLM</text>
+  <path class="line" d="M571 228 L 571 246" marker-end="url(#a)"/>
 
   <g>
-    <rect class="box-live" x="466" y="256" width="200" height="44" rx="6"/>
-    <text class="t title" x="480" y="275">ORCHESTRATOR · 120b</text>
-    <text class="t sub" x="480" y="290">holds the transcript, picks tools</text>
+    <rect class="box-live" x="466" y="250" width="210" height="40" rx="6"/>
+    <text class="t title" x="480" y="267">ORCHESTRATOR · 120b</text>
+    <text class="t sub" x="480" y="282">runs the agent loop, picks tools</text>
   </g>
-
   <g>
-    <rect class="box" x="466" y="308" width="200" height="44" rx="6"/>
-    <text class="t title" x="480" y="327">WRITER · 20b</text>
-    <text class="t sub" x="480" y="342">client-facing prose, own budget</text>
+    <rect class="box" x="466" y="296" width="210" height="40" rx="6"/>
+    <text class="t title" x="480" y="313">READER · 120b</text>
+    <text class="t sub" x="480" y="328">reads GitHub and portfolio</text>
   </g>
-
   <g>
-    <rect class="box" x="466" y="360" width="200" height="44" rx="6"/>
-    <text class="t title" x="480" y="379">EXTRACTOR · 20b</text>
-    <text class="t sub" x="480" y="394">scoring and extraction, cheap</text>
+    <rect class="box" x="466" y="342" width="210" height="40" rx="6"/>
+    <text class="t title" x="480" y="359">WRITER · 20b</text>
+    <text class="t sub" x="480" y="374">pitches, replies, quotes, reminders</text>
   </g>
-
-  <text class="t tiny" x="466" y="416">Every call site names a Role, never a model — which is what makes the spend cap and cost ledger possible.</text>
+  <g>
+    <rect class="box" x="466" y="388" width="210" height="40" rx="6"/>
+    <text class="t title" x="480" y="405">EXTRACTOR · 20b</text>
+    <text class="t sub" x="480" y="420">fit scores, qualifying, requirements</text>
+  </g>
+  <text class="t tiny" x="466" y="446">120b = openai/gpt-oss-120b · 20b = openai/gpt-oss-20b. Past the daily spend cap, the orchestrator uses 20b.</text>
 
   <!-- ===== DATA ===== -->
-  <path class="line" d="M666 155 L 726 155" marker-end="url(#a)"/>
+  <path class="line" d="M676 133 L 726 133" marker-end="url(#a)"/>
 
   <g>
-    <rect class="box" x="730" y="112" width="270" height="86" rx="6"/>
-    <text class="t title" x="744" y="136">Supabase Postgres</text>
-    <text class="t sub" x="744" y="155">profile · thread · message · deal</text>
-    <text class="t sub" x="744" y="170">opportunity · quote · invoice · approval · task</text>
-    <text class="t sub" x="744" y="185">every row scoped to one workspace id</text>
+    <rect class="box" x="730" y="92" width="270" height="100" rx="6"/>
+    <text class="t title" x="744" y="116">Supabase Postgres</text>
+    <text class="t sub" x="744" y="135">profile · opportunity · thread · message</text>
+    <text class="t sub" x="744" y="150">deal · quote · invoice · approval · task</text>
+    <text class="t sub" x="744" y="165">every row scoped to one workspace id</text>
   </g>
 
-  <!-- audit trail -->
-  <path class="line" d="M865 198 L 865 244" marker-end="url(#a)"/>
-  <text class="t lbl" x="872" y="224">hooks log</text>
+  <path class="line" d="M865 192 L 865 236" marker-end="url(#a)"/>
+  <text class="t lbl" x="872" y="218">logs</text>
 
   <g>
-    <rect class="box" x="730" y="250" width="270" height="60" rx="6"/>
-    <text class="t title" x="744" y="272">agent_event · token_ledger</text>
-    <text class="t sub" x="744" y="290">every tool call, latency, tokens, cost</text>
-    <text class="t sub" x="744" y="303">replayed live over SSE in Run Trace</text>
+    <rect class="box" x="730" y="240" width="270" height="66" rx="6"/>
+    <text class="t title" x="744" y="262">agent_event · token_ledger</text>
+    <text class="t sub" x="744" y="280">each step, tool call, tokens and cost</text>
+    <text class="t sub" x="744" y="295">replayed live in the Run Trace</text>
   </g>
-
-  <!-- ===== SOURCES ===== -->
-  <text class="t hdr" x="20" y="252">SOURCE ADAPTERS</text>
-  <g>
-    <rect class="box" x="20" y="264" width="170" height="76" rx="6"/>
-    <text class="t sub" x="34" y="286">Hacker News</text>
-    <text class="t sub" x="34" y="304">Remotive</text>
-    <text class="t sub" x="34" y="322">RemoteOK</text>
-  </g>
-  <text class="t tiny" x="20" y="358">public, no keys, cached raw</text>
-  <path class="line" d="M190 302 L 440 302 L 440 175 L 462 175" marker-end="url(#a)"/>
-  <text class="t lbl" x="198" y="294">→ opportunity rows</text>
 
   <!-- ===== APPROVAL GATE ===== -->
-  <line class="line-dead" x1="20" y1="436" x2="1000" y2="436"/>
-  <text class="t hdr" x="20" y="480">THE APPROVAL GATE — enforced in code, not prompting</text>
+  <line class="rule" x1="20" y1="474" x2="1000" y2="474"/>
+  <text class="t hdr" x="20" y="502">THE APPROVAL GATE — enforced in code, not prompting</text>
 
   <g>
-    <rect class="box-gate" x="20" y="486" width="196" height="70" rx="6"/>
-    <text class="t title" x="34" y="509">draft_reply / draft_pitch</text>
-    <text class="t sub" x="34" y="527">writes text, cannot send</text>
-    <text class="t sub" x="34" y="542">returns "queued"</text>
+    <rect class="box-gate" x="20" y="516" width="196" height="70" rx="6"/>
+    <text class="t title" x="34" y="539">draft_reply / draft_pitch</text>
+    <text class="t sub" x="34" y="557">writes text, cannot send</text>
+    <text class="t sub" x="34" y="572">returns "queued"</text>
   </g>
 
-  <path class="line-gate" d="M216 521 L 262 521" marker-end="url(#ag)"/>
+  <path class="line-gate" d="M216 551 L 262 551" marker-end="url(#ag)"/>
 
   <g>
-    <rect class="box-gate" x="266" y="486" width="180" height="70" rx="6"/>
-    <text class="t title" x="280" y="509">approval row</text>
-    <text class="t sub" x="280" y="527">status: pending</text>
-    <text class="t sub" x="280" y="542">what · why · read · changes</text>
+    <rect class="box-gate" x="266" y="516" width="180" height="70" rx="6"/>
+    <text class="t title" x="280" y="539">approval row</text>
+    <text class="t sub" x="280" y="557">status: pending</text>
+    <text class="t sub" x="280" y="572">what · why · read · changes</text>
   </g>
 
-  <path class="line-gate" d="M446 521 L 492 521" marker-end="url(#ag)"/>
+  <path class="line-gate" d="M446 551 L 492 551" marker-end="url(#ag)"/>
 
   <g>
-    <rect class="box-accent" x="496" y="486" width="180" height="70" rx="6"/>
-    <text class="t title" x="510" y="509">You</text>
-    <text class="t sub" x="510" y="527">Approval Inbox</text>
-    <text class="t sub" x="510" y="542">approve / reject / edit</text>
+    <rect class="box-accent" x="496" y="516" width="180" height="70" rx="6"/>
+    <text class="t title" x="510" y="539">You</text>
+    <text class="t sub" x="510" y="557">Approval Inbox</text>
+    <text class="t sub" x="510" y="572">approve / reject / edit</text>
   </g>
 
-  <path class="line-gate" d="M676 521 L 722 521" marker-end="url(#ag)"/>
-  <text class="t lbl" x="701" y="574" text-anchor="middle">only on approve</text>
+  <path class="line-gate" d="M676 551 L 722 551" marker-end="url(#ag)"/>
+  <text class="t lbl" x="701" y="604" text-anchor="middle">only on approve</text>
 
   <g>
-    <rect class="box" x="726" y="486" width="274" height="70" rx="6"/>
-    <text class="t title" x="740" y="509">executor.py</text>
-    <text class="t sub" x="740" y="527">performs the real side effect</text>
-    <text class="t sub" x="740" y="542">records it, then arms the next check-in</text>
+    <rect class="box" x="726" y="516" width="274" height="70" rx="6"/>
+    <text class="t title" x="740" y="539">executor.py</text>
+    <text class="t sub" x="740" y="557">records it as sent</text>
+    <text class="t sub" x="740" y="572">quotes and invoices arm a check-in</text>
   </g>
 
-  <text class="t tiny" x="20" y="590">An approval-gated tool has no code path that sends. Asking a model not to send things is not a safety model.</text>
+  <text class="t tiny" x="20" y="622">An approval-gated tool has no code path that sends. No email is transmitted yet: you send an approved message from the job board or your own inbox.</text>
 
   <!-- ===== THE MONEY TAIL ===== -->
-  <line class="line-dead" x1="20" y1="614" x2="1000" y2="614"/>
-  <text class="t hdr" x="20" y="642">THE MONEY TAIL — the half that decides whether the work turns into money</text>
+  <line class="rule" x1="20" y1="646" x2="1000" y2="646"/>
+  <text class="t hdr" x="20" y="674">THE MONEY TAIL</text>
 
   <g>
-    <rect class="box-gate" x="20" y="660" width="180" height="62" rx="6"/>
-    <text class="t title" x="32" y="682">draft_quote *</text>
-    <text class="t sub" x="32" y="699">line items from the model</text>
-    <text class="t sub" x="32" y="713">totals computed in Python</text>
+    <rect class="box-gate" x="20" y="688" width="180" height="62" rx="6"/>
+    <text class="t title" x="32" y="710">draft_quote *</text>
+    <text class="t sub" x="32" y="727">line items from the model</text>
+    <text class="t sub" x="32" y="741">totals computed in Python</text>
   </g>
-  <path class="line" d="M200 691 L 212 691" marker-end="url(#a)"/>
+  <path class="line" d="M200 719 L 212 719" marker-end="url(#a)"/>
 
   <g>
-    <rect class="box-accent" x="215" y="660" width="180" height="62" rx="6"/>
-    <text class="t title" x="227" y="682">You: accepted?</text>
-    <text class="t sub" x="227" y="699">human-only — no tool</text>
-    <text class="t sub" x="227" y="713">can record this for you</text>
+    <rect class="box-accent" x="215" y="688" width="180" height="62" rx="6"/>
+    <text class="t title" x="227" y="710">You: accepted?</text>
+    <text class="t sub" x="227" y="727">human-only — no tool</text>
+    <text class="t sub" x="227" y="741">can record this for you</text>
   </g>
-  <path class="line" d="M395 691 L 407 691" marker-end="url(#a)"/>
+  <path class="line" d="M395 719 L 407 719" marker-end="url(#a)"/>
 
   <g>
-    <rect class="box-gate" x="410" y="660" width="180" height="62" rx="6"/>
-    <text class="t title" x="422" y="682">draft_invoice *</text>
-    <text class="t sub" x="422" y="699">refuses unless accepted</text>
-    <text class="t sub" x="422" y="713">number + due date computed</text>
+    <rect class="box-gate" x="410" y="688" width="180" height="62" rx="6"/>
+    <text class="t title" x="422" y="710">draft_invoice *</text>
+    <text class="t sub" x="422" y="727">refuses unless accepted</text>
+    <text class="t sub" x="422" y="741">number + due date computed</text>
   </g>
-  <path class="line" d="M590 691 L 602 691" marker-end="url(#a)"/>
+  <path class="line" d="M590 719 L 602 719" marker-end="url(#a)"/>
 
   <g>
-    <rect class="box-gate" x="605" y="660" width="180" height="62" rx="6"/>
-    <text class="t title" x="617" y="682">chase_payment *</text>
-    <text class="t sub" x="617" y="699">tone escalates each time</text>
-    <text class="t sub" x="617" y="713">silent if paid or not due</text>
+    <rect class="box-gate" x="605" y="688" width="180" height="62" rx="6"/>
+    <text class="t title" x="617" y="710">chase_payment *</text>
+    <text class="t sub" x="617" y="727">tone escalates each time</text>
+    <text class="t sub" x="617" y="741">does nothing if paid or not due</text>
   </g>
-  <path class="line" d="M785 691 L 797 691" marker-end="url(#a)"/>
+  <path class="line" d="M785 719 L 797 719" marker-end="url(#a)"/>
 
   <g>
-    <rect class="box-live" x="800" y="660" width="180" height="62" rx="6"/>
-    <text class="t title" x="812" y="682">You: paid</text>
-    <text class="t sub" x="812" y="699">cancels the chase task</text>
-    <text class="t sub" x="812" y="713">deal closes as won</text>
+    <rect class="box-live" x="800" y="688" width="180" height="62" rx="6"/>
+    <text class="t title" x="812" y="710">You: paid</text>
+    <text class="t sub" x="812" y="727">cancels the chase task</text>
+    <text class="t sub" x="812" y="741">deal closes as won</text>
   </g>
 
-  <text class="t tiny" x="20" y="746">* goes through the same approval gate above. The money tail has no bypass, and no step here can move money.</text>
+  <text class="t tiny" x="20" y="774">* goes through the same approval gate above. There is no payment processor: no step here can move money.</text>
 
   <!-- ===== VIRTUAL CLOCK ===== -->
-  <line class="line-dead" x1="20" y1="770" x2="1000" y2="770"/>
-  <text class="t hdr" x="20" y="798">VIRTUAL CLOCK</text>
-  <text class="t sub" x="132" y="798">every time read goes through clock.now() — advance it days ahead and watch the follow-up and chase ladders fire in seconds</text>
+  <line class="rule" x1="20" y1="798" x2="1000" y2="798"/>
+  <text class="t hdr" x="20" y="826">VIRTUAL CLOCK</text>
+  <text class="t sub" x="132" y="826">every time read goes through clock.now() — advance it days ahead and the follow-up and payment-chase checks fire in seconds</text>
 </svg>

@@ -26,9 +26,9 @@ Source → Score → Pitch → Qualify → Reply → Quote → Invoice → Chase
 5. **Waits for you.** Every client-facing action queues in an Approval Inbox showing four things: what it will do, why, what it read, and what changes in the database. Nothing is ever sent without a human pressing approve.
 6. **Acts on its own schedule.** When a message goes out, a follow-up is scheduled automatically. Days later the agent wakes up, re-reads the thread, and decides whether to nudge — or correctly does nothing if the client already replied.
 
-### Two triggers, one entry point
+### Two kinds of trigger, and your own buttons
 
-Most agents are request→response. Clockwork has two ways to wake up, and both go through a single `run_agent()`:
+Most agents are request→response. Clockwork has two ways to wake up, and both go through `run_agent()`, the full agent loop:
 
 - **Event** — a lead arrives through the public intake form, or you paste a client's reply into a conversation. Either way the agent reads the thread, qualifies the lead and drafts the next message for approval.
 - **Time** — a scheduler drains due tasks and fires the agent with no human present: an in-process timer when running as a server, a scheduled call to `POST /tasks/tick` when hosted serverless.
@@ -41,7 +41,7 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 
 ![Architecture](docs/architecture.svg)
 
-**Single entry point.** Both HTTP requests and the scheduler call `run_agent(trigger)`. There is no second code path — a scheduled run and an inbound message are the same machinery with different prompts.
+**One agent loop, and buttons that skip it.** A client message, a pasted reply and the scheduler all call `run_agent(trigger)`, where the orchestrator model decides which tools to use — a scheduled run and an inbound message are the same machinery with different prompts. The buttons in the app (set up, find leads, score, pitch, quote, invoice, chase) call the same tool code directly, without the orchestrator. Both paths are recorded as runs with their steps and costs, and both go through the same approval gate.
 
 **The approval gate is enforced in code, not prompting.** An approval-gated tool physically cannot send: it writes an `approval` row and returns "queued". A separate executor performs the side effect only after a human approves. Asking a model nicely not to send things is not a safety model.
 
@@ -54,7 +54,7 @@ That second one is the whole point, and it's why there's a **virtual clock**: ev
 | Feature | How |
 |---|---|
 | `@tool` | 12 typed tools, all of which mutate real business state |
-| `structured_output_model=` | Pydantic schemas for every extraction/scoring step — no string parsing anywhere |
+| `structured_output_model=` | Pydantic schemas for fit scores, lead qualification, requirement extraction, quote line items and the profile import |
 | Hooks | `BeforeToolCallEvent` / `AfterToolCallEvent` / `AfterInvocationEvent` → the `agent_event` audit trail |
 | Model abstraction | One `Role` enum (orchestrator / reader / writer / extractor) routed to different models per job |
 
@@ -186,7 +186,7 @@ Two Vercel projects from this one repository. Order matters, because each needs 
 ```
 apps/agent/          FastAPI + the Strands agent
   src/clockwork/
-    agent.py         run_agent() — the single entry point
+    agent.py         run_agent() — the agent loop for messages and the scheduler
     api.py           HTTP surface (workspace header on every route bar /accounts, /intake, /health)
     audit.py         Strands hooks → agent_event
     auth.py          workspace identity (read its docstring: identifies, does not authenticate)
