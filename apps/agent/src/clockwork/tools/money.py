@@ -34,6 +34,7 @@ from strands import tool
 from ..clock import now as clock_now
 from ..context import current_user_id
 from ..db import get_client
+from ..greeting import apply_greeting, greeting_instruction, thread_greeting_source
 from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import QuoteDraft
@@ -65,30 +66,26 @@ def _load_profile(user_id: str) -> dict:
     return (res.data if res else None) or {}
 
 
-# Appended to every client-facing system prompt in this file. The first
-# live run produced "Hi [Client]," in a payment reminder -- which is the
-# single most embarrassing thing that could go out under someone's name,
-# because it announces that a machine wrote it and nobody read it. The
-# contact's name is right there on the thread, so pass it in and forbid
-# the placeholder explicitly.
-NO_PLACEHOLDERS = (
-    "Address the client by the name given. If no name is given, open with 'Hi there'. "
-    "NEVER write a bracketed placeholder like [Client], [Name] or [Your name] -- this "
-    "text goes out exactly as you write it, with nothing filled in afterwards."
-)
+# Every client-facing prompt in this file ends with greeting_instruction(),
+# and every draft passes through apply_greeting() before it is queued. The
+# first live run produced "Hi [Client]," in a payment reminder, and a
+# pitched deal's contact is the posting's title -- see greeting.py for why
+# the name is decided in code rather than left to the model.
 
 
 def _contact_name(thread_id: str, user_id: str) -> str | None:
+    """The contact's name if we were ever told one -- None for a deal that
+    began as a pitch, whose stored contact is a company or posting title."""
     res = (
         get_client()
         .table("thread")
-        .select("contact_name")
+        .select("contact_name, channel")
         .eq("id", thread_id)
         .eq("user_id", user_id)
         .maybe_single()
         .execute()
     )
-    return (res.data or {}).get("contact_name") if res else None
+    return thread_greeting_source(res.data if res else None)
 
 
 def _transcript(thread_id: str, user_id: str) -> str:
@@ -270,6 +267,7 @@ def draft_quote_for(deal_id: str) -> dict:
     rates = profile.get("rates") or {}
     currency = rates.get("currency") or "USD"
     payment_terms = profile.get("payment_terms") or f"Net {DEFAULT_TERMS_DAYS}"
+    contact = _contact_name(deal["thread_id"], user_id)
 
     result = invoke_model(
         Role.WRITER,
@@ -283,7 +281,7 @@ def draft_quote_for(deal_id: str) -> dict:
             f"Available: {profile.get('availability_hours') or 'unstated'} hours a week\n"
             f"Portfolio (for scale of comparable work): {profile.get('portfolio') or []}\n\n"
             "THE DEAL\n"
-            f"Client: {_contact_name(deal['thread_id'], user_id) or '(name unknown)'}\n"
+            f"Client: {contact or '(name unknown)'}\n"
             f"What they want: {deal.get('intent') or 'not yet summarised'}\n"
             f"Qualification: {deal.get('score') or 'unscored'} -- "
             f"{deal.get('score_rationale') or 'no rationale'}\n"
@@ -302,7 +300,7 @@ def draft_quote_for(deal_id: str) -> dict:
             "a requirement. Do not undercut the freelancer's stated rate to look "
             "competitive. The timeline must be reachable at the hours a week they "
             "actually have available, not at full time.\n\n"
-            f"The covering note is client-facing. {NO_PLACEHOLDERS}"
+            f"The covering note is client-facing. {greeting_instruction(contact)}"
         ),
         structured_output_model=QuoteDraft,
     )
@@ -333,7 +331,7 @@ def draft_quote_for(deal_id: str) -> dict:
     )
     quote = quote_row.data[0]
 
-    body = render_quote({**quote, "covering_note": draft.covering_note})
+    body = render_quote({**quote, "covering_note": apply_greeting(draft.covering_note, contact)})
 
     approval_id = create_approval(
         action_type="send_quote",
@@ -561,13 +559,14 @@ def chase_payment_for(invoice_id: str) -> dict:
     profile = _load_profile(user_id)
     deal = _load_deal(invoice["deal_id"], user_id)
     stage = CHASE_LADDER[min(invoice["chase_count"], len(CHASE_LADDER) - 1)]
+    contact = _contact_name(deal["thread_id"], user_id)
 
     result = invoke_model(
         Role.WRITER,
         (
             f"Freelancer: {profile.get('name')}\n"
             f"How they write: {(profile.get('voice_samples') or ['(no samples)'])[0]}\n"
-            f"Client: {_contact_name(deal['thread_id'], user_id) or '(name unknown)'}\n\n"
+            f"Client: {contact or '(name unknown)'}\n\n"
             f"Invoice {invoice['number']} for "
             f"{_money(invoice['amount'], invoice['currency'])}\n"
             f"Work: {deal.get('intent') or 'the agreed work'}\n"
@@ -581,11 +580,11 @@ def chase_payment_for(invoice_id: str) -> dict:
             "Under 100 words. No grovelling, no apologising for asking to be paid, no "
             "passive aggression. Reference the invoice number and the amount. Never "
             "invent fees, interest or legal steps that aren't in the stated terms.\n\n"
-            f"{NO_PLACEHOLDERS}\n\n"
+            f"{greeting_instruction(contact)}\n\n"
             f"{stage}"
         ),
     )
-    body = str(result)
+    body = apply_greeting(str(result), contact)
 
     approval_id = create_approval(
         action_type="send_payment_chase",

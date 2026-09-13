@@ -7,6 +7,7 @@ from strands import tool
 
 from ..context import current_run_id, current_user_id
 from ..db import get_client
+from ..greeting import apply_greeting, greeting_instruction, thread_greeting_source
 from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import ExtractedRequirements, LeadScore
@@ -215,6 +216,9 @@ def draft_reply(thread_id: str) -> dict:
     thread = get_thread(thread_id)
     messages = thread["content"][0]["json"]["messages"]
     transcript = "\n".join(f"[{m['direction']}] {m['body']}" for m in messages)
+    # A name typed into the intake form is worth checking; a pitched deal's
+    # stored contact is a company or posting title and never is.
+    contact = thread_greeting_source(thread["content"][0]["json"]["thread"])
 
     context = recall(f"drafting a reply for thread {thread_id}")
     profile = context["content"][0]["json"]["profile"] or {}
@@ -230,10 +234,11 @@ def draft_reply(thread_id: str) -> dict:
         system_prompt=(
             "You write freelance client replies in the freelancer's own voice, "
             "grounded in their real profile and portfolio. Never invent facts "
-            "about the freelancer that aren't in the profile."
+            "about the freelancer that aren't in the profile.\n\n"
+            f"{greeting_instruction(contact)}"
         ),
     )
-    body = str(result)
+    body = apply_greeting(str(result), contact)
 
     citations = [m["id"] for m in messages]
     approval_id = create_approval(

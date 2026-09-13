@@ -1263,17 +1263,28 @@ def intake(user_id: str, req: IntakeRequest) -> dict:
     )
     deal_id = deal.data[0]["id"]
 
-    run = run_agent(
-        Trigger(
-            user_id=user_id,
-            trigger_type="message",
-            trigger_ref=thread_id,
-            prompt=(
-                f"A new inbound message just arrived on thread {thread_id} "
-                f"(deal {deal_id}). Qualify the lead and draft a reply."
-            ),
+    # The client's message is saved above, whatever happens next -- so the
+    # person who filled in the form is told it arrived even if the agent's
+    # own run fails. That run used to raise straight through to a 500, and
+    # a stranger sending a real enquiry saw an error for a message the
+    # freelancer had in fact received. The failure isn't hidden: run_agent
+    # has already recorded the run as failed with its reason, where the
+    # freelancer can see it, and the thread is waiting for them.
+    try:
+        run = run_agent(
+            Trigger(
+                user_id=user_id,
+                trigger_type="message",
+                trigger_ref=thread_id,
+                prompt=(
+                    f"A new inbound message just arrived on thread {thread_id} "
+                    f"(deal {deal_id}). Qualify the lead and draft a reply."
+                ),
+            )
         )
-    )
+    except Exception:
+        logger.exception("intake run failed for thread %s", thread_id)
+        return {"thread_id": thread_id, "deal_id": deal_id, "run_id": None, "run_status": "failed"}
 
     return {"thread_id": thread_id, "deal_id": deal_id, "run_id": run.id, "run_status": run.status}
 

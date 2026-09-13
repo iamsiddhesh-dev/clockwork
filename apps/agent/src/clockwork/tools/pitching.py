@@ -17,6 +17,7 @@ from strands import tool
 
 from ..context import current_user_id
 from ..db import get_client
+from ..greeting import apply_greeting, greeting_instruction
 from ..ledger import invoke_model
 from ..models import Role
 from ..sources.checking import is_dead
@@ -89,7 +90,10 @@ def draft_pitch_for(opportunity_id: str) -> dict:
             + ("\n---\n".join(voice_samples[:2]) if voice_samples else "(no samples given)")
             + "\n\nTHE OPPORTUNITY\n"
             f"Title: {opp.get('title')}\n"
-            f"Posted by: {opp.get('author')}\n"
+            # Labelled for what it is. A board's "author" is a username or
+            # a company, and handed over as "Posted by" it got greeted as
+            # a person: "Hi NOPE,".
+            f"Posted by (a username or company, not a name to greet): {opp.get('author')}\n"
             f"Body:\n{(opp.get('body') or '')[:MAX_BODY_CHARS]}\n\n"
             "WHY THIS WAS FLAGGED AS A MATCH\n"
             + ("\n".join(f"- {e}" for e in evidence) if evidence else "- (not scored yet)")
@@ -103,10 +107,14 @@ def draft_pitch_for(opportunity_id: str) -> dict:
             "question. Under 150 words. No 'I hope this finds you well', no listing "
             "every skill they have, no inventing experience that isn't in the "
             "profile. If the portfolio has nothing genuinely relevant, say plainly "
-            "what they would bring instead of stretching."
+            "what they would bring instead of stretching.\n\n"
+            # Never by name. No board supplies a person's name: Hacker News
+            # gives a username, Remotive and RemoteOK give a company, and
+            # "Acme Labs" is shaped exactly like a person.
+            f"{greeting_instruction(None)}"
         ),
     )
-    body = str(result)
+    body = apply_greeting(str(result), None)
 
     approval_id = create_approval(
         action_type="send_pitch",
