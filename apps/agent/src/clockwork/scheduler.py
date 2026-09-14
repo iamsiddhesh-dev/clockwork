@@ -16,6 +16,7 @@ Two callers:
     virtual clock at all.
 """
 
+import time
 from datetime import datetime, timedelta
 
 from .agent import Trigger, run_agent
@@ -38,6 +39,8 @@ MAX_TASK_ATTEMPTS = 5
 # How far a check-in is pushed back while the reply it would follow up is
 # still waiting for approval.
 RECHECK_DAYS = 3
+
+TRANSIENT_RETRY_SECONDS = 2
 
 
 def _thread_for_quote(quote_id: str, user_id: str) -> str | None:
@@ -123,7 +126,16 @@ def _run_payment_check(task: dict) -> dict:
         with manual_run(
             task["user_id"], label="Payment check", trigger_ref=task_id, trigger_type="schedule"
         ) as run:
-            result = chase_payment_for(task["subject_id"])
+            try:
+                result = chase_payment_for(task["subject_id"])
+            except Exception as exc:
+                # One quick retry on a database or network hiccup, so a
+                # passing timeout doesn't leave an overdue invoice unchased
+                # until the next tick.
+                if _transient_error(exc) is None:
+                    raise
+                time.sleep(TRANSIENT_RETRY_SECONDS)
+                result = chase_payment_for(task["subject_id"])
             if result.get("action") == "chase_drafted":
                 run.outcome = (
                     f"The invoice is {result.get('days_overdue')} days overdue, so a payment "
@@ -331,10 +343,27 @@ def _run_task(task: dict) -> dict:
         return _task_failed(task, exc)
 
 
+_TRANSIENT_MARKERS = ("Gateway Timeout", "'code': 502", "'code': 503", "'code': 504", "ReadError", "ConnectError", "RemoteProtocolError")
+
+
+def _transient_error(exc: BaseException) -> BaseException | None:
+    """A rate limit, or a database/network hiccup worth trying again.
+
+    A live payment check failed on a single Supabase "504 Gateway Timeout";
+    the same call succeeded two seconds later. Treated like a rate limit:
+    requeued, not given up on.
+    """
+    rate_limit_exc = root_rate_limit_error(exc)
+    if rate_limit_exc is not None:
+        return rate_limit_exc
+    text = f"{type(exc).__name__}: {exc}"
+    return exc if any(marker in text for marker in _TRANSIENT_MARKERS) else None
+
+
 def _task_failed(task: dict, exc: Exception) -> dict:
     client = get_client()
     task_id = task["id"]
-    rate_limit_exc = root_rate_limit_error(exc)
+    rate_limit_exc = _transient_error(exc)
     if rate_limit_exc is not None:
         # Requeue rather than fail outright -- this is the same
         # transient TPM blip that's hit repeatedly in testing, and
