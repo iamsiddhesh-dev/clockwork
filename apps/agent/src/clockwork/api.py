@@ -10,6 +10,7 @@ Routes:
   GET   /runs/{id}/events?account= -> SSE stream of agent_event rows
   GET   /threads                   -> list threads (Threads view)
   GET   /threads/{id}              -> thread + messages + its deal
+  POST  /threads/{id}/messages     -> log a client's reply, fires a run
   GET   /search?q=                 -> one ranked list across every entity
   GET   /summary                   -> chrome poll: badge, spend, next wake
   GET   /overview                  -> everything the dashboard renders
@@ -38,9 +39,9 @@ Routes:
                                        CRON_SECRET; for serverless hosts)
   GET   /health
 
-Gmail OAuth (inbound polling / send) is not wired here yet -- see
-executor.py's TODO. It needs a Google Cloud console app set up by hand
-before any code can use it.
+No email is sent or received: approving a message records it as sent
+(see executor.py), and a client's reply comes back in through
+POST /threads/{id}/messages or the public intake form.
 
 Lists are paginated: `?limit=&offset=`, with the unfiltered total in
 an `X-Total-Count` response header rather than wrapped around the body,
@@ -60,8 +61,7 @@ instead, resolved the same way.
 Background: when this runs as a long-lived server (uvicorn, locally), an
 APScheduler job polls `scheduler.tick_all_due()` every 30s so tasks fire
 in real time too, not only right after `/clock/advance` (see `lifespan`
-below) -- the "Worker loop (APScheduler)" from PLAN.md's architecture
-diagram. On Vercel there is no long-lived process for that timer to live
+below). On Vercel there is no long-lived process for that timer to live
 in, so the same drain is exposed as `POST /tasks/tick` and called from
 outside on a schedule instead.
 """
@@ -310,8 +310,8 @@ def get_run(run_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
 @app.get("/runs/{run_id}/events")
 async def stream_run_events(run_id: str, user_id: str = Depends(account_from_query)):
     """SSE stream of agent_event rows for a run, polling Postgres (no
-    Supabase Realtime dependency for Phase 1 -- swap for a Realtime
-    subscription later if polling latency becomes visible). Takes
+    Supabase Realtime dependency -- swap for a Realtime subscription
+    if polling latency ever becomes visible). Takes
     `?account=` rather than a header -- see module docstring; browser
     EventSource cannot set custom headers."""
     client = get_client()

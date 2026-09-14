@@ -1,5 +1,5 @@
 -- Clockwork — initial schema
--- Covers just enough for the Phase 1 checkpoint loop:
+-- The first tables, for the core loop:
 --   a message arrives -> deal created, scored, reply drafted -> appears
 --   in the Approval Inbox.
 -- Remaining tables (quote, project, scope_item, invoice, approval,

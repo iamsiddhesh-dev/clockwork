@@ -1,6 +1,6 @@
-"""Tools batch A -- the six tools needed for the Phase 1 checkpoint loop:
-a message arrives -> deal created, scored, reply drafted -> appears in the
-Approval Inbox. All hit real Postgres (via Supabase); no mocked data.
+"""The conversation tools: a message arrives -> deal created, scored, reply
+drafted -> appears in the Approval Inbox. All hit real Postgres (via
+Supabase); no mocked data.
 """
 
 from strands import tool

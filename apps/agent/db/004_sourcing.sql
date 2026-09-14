@@ -28,8 +28,8 @@ create table source (
 
 -- ── opportunity ─────────────────────────────────────────────────────────
 -- A single sourced lead. `raw` caches the source's own payload verbatim so
--- a demo never depends on a live third party being up (PLAN.md's explicit
--- requirement) and so re-scoring never needs a refetch.
+-- a demo never depends on a live third party being up, and so re-scoring
+-- never needs a refetch.
 create table opportunity (
     id                uuid primary key default gen_random_uuid(),
     user_id           uuid not null references auth.users(id) on delete cascade,

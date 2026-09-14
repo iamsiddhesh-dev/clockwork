@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# written by `next dev` for coding assistants; regenerated on every run
+AGENTS.md
+CLAUDE.md

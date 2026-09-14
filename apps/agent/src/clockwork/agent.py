@@ -1,5 +1,7 @@
-"""run_agent() -- the single entry point. Both the HTTP layer (api.py) and
-the scheduler's tick() call this. There is no second path.
+"""run_agent() -- the agent loop. A client message, a pasted reply and a
+scheduled check-in all come through here. Work with no decision to make --
+a button press, a due payment check -- calls the same tool code directly
+and is recorded by runs.manual_run instead.
 
 Opens an `agent_run` row, builds the orchestrator with the audit hook
 attached, runs it, closes the row with an outcome + total cost. Any

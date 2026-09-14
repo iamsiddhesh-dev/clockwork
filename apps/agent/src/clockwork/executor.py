@@ -4,11 +4,12 @@ An approval-gated tool only ever queues an `approval` row -- it never
 performs the side effect itself. Once a human approves it (via the API),
 this module actually does the thing and flips the approval to `executed`.
 
-Gmail send isn't wired yet (Phase 1 Day 4 item, needs OAuth setup in the
-Google Cloud console -- a human task, not something to build blind). Until
-then, `send_email` logs the outbound message to the thread so the rest of
-the loop (Approval Inbox -> "sent" -> thread updated) is demoable, and
-marks the approval executed with a note that delivery is stubbed.
+No email is transmitted. `send_email` and `send_pitch` record the outbound
+message on the thread, so the loop (Approval Inbox -> "sent" -> thread
+updated -> follow-up) works end to end, and mark the approval executed with
+`delivered_via: "stub"`. The freelancer sends the message themselves, from
+the job board or their own inbox. Gmail's send scope needs a security
+review, which is why real delivery is not built.
 """
 
 from datetime import datetime, timezone
@@ -37,8 +38,7 @@ def _execute_send_email(approval: dict) -> dict:
         "id", thread_id
     ).execute()
 
-    # TODO(Day 4 Gmail integration): actually call the Gmail API here once
-    # OAuth (testing mode) is wired. Until then this only logs the message.
+    # Recorded, not transmitted -- see the module docstring.
     return {"delivered_via": "stub", "thread_id": thread_id}
 
 
@@ -114,8 +114,7 @@ def _execute_send_pitch(approval: dict) -> dict:
         {"status": "converted", "deal_id": deal_id, "updated_at": "now()"}
     ).eq("id", opportunity_id).eq("user_id", user_id).execute()
 
-    # TODO: same Gmail gap as _execute_send_email -- the message is
-    # recorded, not transmitted.
+    # Recorded, not transmitted -- see the module docstring.
     return {
         "delivered_via": "stub",
         "thread_id": thread_id,

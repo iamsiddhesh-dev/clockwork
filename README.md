@@ -2,7 +2,7 @@
 
 **A Strands agent that runs the business half of freelancing: finding work, pitching, replying, quoting, invoicing and chasing payment, on its own schedule, with a human approving everything that reaches a client.**
 
-**[Live demo](https://clockwork-live.vercel.app)** · **Demo video:** *link added at submission* · **[Architecture](docs/architecture.svg)** · Built for the Agents for Humans hackathon, Professional Agents track.
+**[Live demo](https://clockwork-live.vercel.app)** · **[Architecture](docs/architecture.svg)** · Built for the Agents for Humans hackathon, Professional Agents track.
 
 ---
 

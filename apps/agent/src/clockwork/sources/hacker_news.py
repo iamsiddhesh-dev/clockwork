@@ -1,6 +1,6 @@
 """Hacker News, via the free Algolia API. No auth, no key, no scraping.
 
-PLAN.md originally targeted the monthly *"Ask HN: Freelancer? Seeking
+The original target was the monthly *"Ask HN: Freelancer? Seeking
 freelancer?"* thread. **That thread was discontinued after October 2025**
 -- verified against the live API on Aug 30, 2026: the `whoishiring` bot
 still posts monthly, but only "Who is hiring?" and "Who wants to be
