@@ -14,15 +14,15 @@ import { Logo } from "./icons";
  * with the form hidden beneath it.
  *
  * Normally the intro ends earlier, the moment the slide-out animation
- * reports finishing (about 5s after first paint). This only fires when
- * that never happens. It sits a little past 5s rather than on it because
+ * reports finishing (4s after first paint). This only fires when that
+ * never happens. It sits a little past 4s rather than on it because
  * animations start at first paint, which on a real network lands a few
- * hundred milliseconds after the page's clock starts -- cutting at 5.0s
+ * hundred milliseconds after the page's clock starts -- cutting at 4.0s
  * would chop the end off a slide that was running perfectly well.
  *
  * Keep in step with the preloader timeline in globals.css.
  */
-const INTRO_ENDS_AT_MS = 6500;
+const INTRO_ENDS_AT_MS = 4500;
 
 /**
  * The first thing anyone sees: the mark travels in from the left, the

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api, type Profile } from "@/lib/api";
-import { ensureAccount } from "@/lib/account";
+import { api, ApiError, type Profile } from "@/lib/api";
+import { clearAccount, ensureAccount, readAccount, signIn } from "@/lib/account";
 import { Logo } from "@/components/shell/icons";
 import { Preloader } from "@/components/shell/preloader";
 import {
@@ -93,6 +93,9 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
   }, []);
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The email typed here already belongs to another workspace.
+  const [emailTaken, setEmailTaken] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [phase, setPhase] = useState<PhaseKey>("save");
   const [progress, setProgress] = useState(0);
 
@@ -149,6 +152,7 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
 
     setStage("working");
     setError(null);
+    setEmailTaken(false);
     setProgress(0);
 
     const problems: string[] = [];
@@ -165,13 +169,27 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
     // 1. The profile, first and on its own. Everything after this can fail
     //    without losing what the person just typed.
     let account: string;
+    const hadWorkspace = readAccount() !== null;
     try {
       begin("save");
       account = await ensureAccount();
       await api.saveProfile(account, { ...form, portfolio: usablePortfolio(form) });
       finish("save");
     } catch (err) {
-      setError((err as Error).message);
+      if (err instanceof ApiError && err.status === 409) {
+        // The email is already another workspace's. The empty workspace
+        // this attempt just created would otherwise be left behind, with
+        // this browser's cookie pointing at it -- remove it, then offer
+        // the workspace the email actually belongs to.
+        if (!hadWorkspace) {
+          const created = readAccount();
+          if (created) await api.deleteAccount(created).catch(() => {});
+          clearAccount();
+        }
+        setEmailTaken(true);
+      } else {
+        setError((err as Error).message);
+      }
       setStage("error");
       return;
     }
@@ -357,6 +375,52 @@ export function OnboardingFlow({ initial }: { initial: Profile | null }) {
             );
           })}
         </ol>
+      </Frame>
+    );
+  }
+
+  if (emailTaken) {
+    return (
+      <Frame>
+        <div className="cw-label">Email in use</div>
+        <h1 className="cw-h1" style={{ marginTop: 10 }}>
+          This email already has a workspace.
+        </h1>
+        <p style={{ margin: "10px 0 0", fontSize: 14, color: "var(--dim)" }}>
+          {form.email} was used to set one up before. Open it, or go back and use a different email.
+        </p>
+        {error && <p style={{ margin: "10px 0 0", fontSize: 14, color: "var(--bad)" }}>{error}</p>}
+        <div className="cw-row" style={{ marginTop: 24, gap: 10 }}>
+          <button
+            className="cw-btn cw-btn-primary"
+            disabled={opening}
+            onClick={async () => {
+              setOpening(true);
+              setError(null);
+              try {
+                await signIn(form.email ?? "");
+                router.push("/overview");
+                router.refresh();
+              } catch (err) {
+                setError((err as Error).message);
+                setOpening(false);
+              }
+            }}
+          >
+            {opening ? "Opening…" : "Open that workspace"}
+          </button>
+          <button
+            className="cw-btn"
+            disabled={opening}
+            onClick={() => {
+              setEmailTaken(false);
+              setStepIndex(0);
+              setStage("form");
+            }}
+          >
+            Use a different email
+          </button>
+        </div>
       </Frame>
     );
   }

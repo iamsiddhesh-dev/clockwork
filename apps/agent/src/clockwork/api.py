@@ -478,6 +478,14 @@ def put_profile(body: ProfileBody, user_id: str = Depends(get_current_user_id)) 
     client = get_client()
     payload = body.model_dump()
 
+    # The address onboarding just collected becomes the way back into
+    # this workspace if the cookie is ever lost. Done on every save, not
+    # only the first: correcting a typo here has to correct what you sign
+    # in with, or the correction is worse than the typo. Checked before
+    # the profile is written, so a 409 (another workspace already holds
+    # the address -- see auth.claim_email) leaves nothing half-saved.
+    claim_email(user_id, payload.get("email"))
+
     existing = (
         client.table("profile").select("id").eq("user_id", user_id).maybe_single().execute()
     )
@@ -490,13 +498,6 @@ def put_profile(body: ProfileBody, user_id: str = Depends(get_current_user_id)) 
         )
     else:
         res = client.table("profile").insert({**payload, "user_id": user_id}).execute()
-
-    # The address onboarding just collected becomes the way back into
-    # this workspace if the cookie is ever lost. Done on every save, not
-    # only the first: correcting a typo here has to correct what you sign
-    # in with, or the correction is worse than the typo. Raises 409 if
-    # another workspace already holds it -- see auth.claim_email.
-    claim_email(user_id, payload.get("email"))
 
     return res.data[0]
 

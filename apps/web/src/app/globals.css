@@ -680,15 +680,15 @@ textarea::placeholder {
 }
 
 /* -- preloader -------------------------------------------------------
-   Five seconds, three beats, and no cut.
+   Four seconds, three beats, and no cut.
 
      0.00s  the mark travels in from the left
      0.65s  the wordmark travels in from the right to meet it
-     1.60s  the finished lockup holds -- a little over two seconds,
-            because the hold IS the brand moment; everything before it
-            is arrival
-     3.85s  the whole panel slides up and off, uncovering the page
-     5.00s  done
+     1.60s  the finished lockup holds for a little under a second and a
+            half, because the hold IS the brand moment; everything
+            before it is arrival
+     3.00s  the whole panel slides up and off, uncovering the page
+     4.00s  done
 
    It used to tear down the middle. Two halves sliding apart means there
    is always an edge where they meet, and an edge in the middle of a
@@ -733,7 +733,7 @@ textarea::placeholder {
   /* easeInOutQuart. A curtain that starts and ends at rest but covers
      the middle fast: it reads as weight, where a linear slide reads as a
      panel being dragged. */
-  animation: cw-preloader-out 1150ms cubic-bezier(0.76, 0, 0.24, 1) 3850ms forwards;
+  animation: cw-preloader-out 1000ms cubic-bezier(0.76, 0, 0.24, 1) 3000ms forwards;
 }
 
 /* The content underneath stays invisible until just before the panel
@@ -746,7 +746,7 @@ textarea::placeholder {
    opens is two transitions competing, and the eye reads the slower one
    as lag. */
 [data-preload="on"] .cw-reveal-target {
-  animation: cw-reveal 420ms ease-out 3380ms both;
+  animation: cw-reveal 420ms ease-out 2530ms both;
 }
 
 /* The same warm/cool wash the app itself sits on, carrying the same 80px

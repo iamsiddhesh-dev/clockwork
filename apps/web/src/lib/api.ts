@@ -427,12 +427,45 @@ async function request(path: string, account: string, init?: RequestInit) {
     await new Promise((resolve) => setTimeout(resolve, READ_RETRY_DELAYS_MS[attempt]));
   }
 
-  if (!res) throw new Error(`${method} ${path} -> no response`);
+  if (!res) throw new ApiError(0, "Couldn't reach Clockwork. Check your connection and try again.");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
+    throw new ApiError(res.status, readableError(res.status, body));
   }
   return res;
+}
+
+/** A failed API call, with a message fit to show a person. The status is
+ *  kept so a screen can act on a specific case (409, 401) rather than
+ *  matching on wording. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** FastAPI answers `{"detail": "..."}`, or a list of field errors for a
+ *  validation failure. Screens used to print the whole thing -- method,
+ *  path, status and raw JSON -- straight into the UI. */
+function readableError(status: number, body: string): string {
+  try {
+    const detail = (JSON.parse(body) as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0] as { msg?: string; loc?: unknown[] };
+      const field = Array.isArray(first.loc) ? first.loc[first.loc.length - 1] : null;
+      if (first.msg) return field ? `${String(field)}: ${first.msg}` : first.msg;
+    }
+  } catch {
+    /* not JSON: fall through to a plain message */
+  }
+  if (status === 429) return "Too many requests right now. Wait a minute and try again.";
+  if (status >= 500) return "Something went wrong on our side. Try again in a moment.";
+  return "That didn't work. Try again.";
 }
 
 async function apiFetch<T>(path: string, account: string, init?: RequestInit): Promise<T> {
