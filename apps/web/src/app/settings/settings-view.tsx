@@ -287,12 +287,6 @@ function AccountCard({ account }: { account: AccountRecord | null }) {
               </>
             )}
           </p>
-          <p
-            className="cw-mono"
-            style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)", wordBreak: "break-all" }}
-          >
-            {account.id}
-          </p>
         </>
       ) : (
         <p style={{ margin: "8px 0 0", fontSize: 13.5, color: "var(--warn)" }}>

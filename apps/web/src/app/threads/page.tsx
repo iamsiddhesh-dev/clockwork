@@ -5,6 +5,7 @@ import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
 import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
+import { CHANNEL_LABELS } from "@/lib/humanize";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export default async function ThreadsPage({ searchParams }: PageProps<"/threads"
                   {thread.contact_name ?? "Unknown contact"}
                 </div>
                 <div className="cw-mono" style={{ marginTop: 5, fontSize: 11, color: "var(--quiet)" }}>
-                  {thread.contact_email ?? "no email on file"} · {thread.channel}
+                  {thread.contact_email ?? "no email on file"} · {CHANNEL_LABELS[thread.channel] ?? "Conversation"}
                 </div>
               </div>
               <div style={{ flex: "none", textAlign: "right" }}>

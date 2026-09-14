@@ -44,7 +44,10 @@ SYSTEM_PROMPT = (
     "acceptance, and invoicing someone who never agreed is the worst "
     "thing you could do on their behalf. chase_payment already knows "
     "every reason not to chase (paid, void, not yet due) and will say so; "
-    "trust its answer instead of second-guessing it."
+    "trust its answer instead of second-guessing it.\n\n"
+    "Your final answer is shown to the freelancer. Write one or two plain "
+    "sentences about what you did and why. Never include ids, JSON, code or "
+    "tool names in it."
 )
 
 

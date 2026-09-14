@@ -4,14 +4,36 @@ import { useEffect, useRef, useState } from "react";
 import { api, type AgentEvent } from "@/lib/api";
 import { readAccount } from "@/lib/account";
 import { Empty } from "@/components/ui";
+import { cleanText, runErrorText, stepLabel } from "@/lib/humanize";
 
 const KIND: Record<string, { dot: string; label: string; weight: number }> = {
-  model_call: { dot: "var(--quiet)", label: "model call", weight: 500 },
-  tool_call: { dot: "var(--blue)", label: "called", weight: 600 },
-  tool_result: { dot: "var(--ok)", label: "returned", weight: 500 },
-  decision: { dot: "var(--orange)", label: "decision", weight: 600 },
-  error: { dot: "var(--bad)", label: "error", weight: 600 },
+  model_call: { dot: "var(--quiet)", label: "AI model", weight: 500 },
+  tool_call: { dot: "var(--blue)", label: "started", weight: 600 },
+  tool_result: { dot: "var(--ok)", label: "done", weight: 500 },
+  decision: { dot: "var(--orange)", label: "Step", weight: 600 },
+  error: { dot: "var(--bad)", label: "Problem", weight: 600 },
 };
+
+/** "writer model · openai/gpt-oss-20b" -> "Writer model (gpt-oss-20b)" */
+function modelLine(rationale: string | null): string | null {
+  const match = rationale?.match(/^(\w+) model · (?:[\w-]+\/)*([\w.-]+)$/);
+  if (!match) return null;
+  return `${match[1].charAt(0).toUpperCase()}${match[1].slice(1)} model (${match[2]})`;
+}
+
+function describe(event: AgentEvent): { title: string; detail: string | null } {
+  if (event.kind === "model_call") {
+    return { title: stepLabel(event.tool_name, "Wrote text"), detail: modelLine(event.rationale) };
+  }
+  if (event.kind === "error") {
+    return { title: "Problem", detail: runErrorText(event.rationale ?? String(event.payload?.error ?? "")) };
+  }
+  if (event.kind === "decision") {
+    const text = event.rationale === "Agent invocation completed." ? "Finished." : cleanText(event.rationale);
+    return { title: event.tool_name ? stepLabel(event.tool_name) : "Step", detail: text || null };
+  }
+  return { title: stepLabel(event.tool_name), detail: cleanText(event.rationale) || null };
+}
 
 function timeOf(iso: string) {
   return new Date(iso).toLocaleTimeString("en-US", {
@@ -22,8 +44,9 @@ function timeOf(iso: string) {
 }
 
 function Event({ event, last }: { event: AgentEvent; last: boolean }) {
-  const kind = KIND[event.kind] ?? { dot: "var(--quiet)", label: event.kind, weight: 500 };
-  const hasPayload = event.payload && Object.keys(event.payload).length > 0;
+  const kind = KIND[event.kind] ?? { dot: "var(--quiet)", label: "Step", weight: 500 };
+  const { title, detail } = describe(event);
+  const showKind = event.kind === "tool_call" || event.kind === "tool_result" || event.kind === "model_call";
 
   return (
     <li style={{ display: "grid", gridTemplateColumns: "74px 20px minmax(0, 1fr)", paddingBottom: 24 }}>
@@ -65,38 +88,18 @@ function Event({ event, last }: { event: AgentEvent; last: boolean }) {
 
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: kind.weight, lineHeight: 1.4 }}>
-          {event.tool_name ?? kind.label}
-          {event.tool_name && (
+          {title}
+          {showKind && (
             <span className="cw-mono" style={{ marginLeft: 8, fontSize: 11, color: "var(--quiet)" }}>
               {kind.label}
             </span>
           )}
         </div>
 
-        {event.rationale && (
-          <p style={{ margin: "5px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--dim)" }}>
-            {event.rationale}
+        {detail && (
+          <p style={{ margin: "5px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--dim)", whiteSpace: "pre-wrap" }}>
+            {detail}
           </p>
-        )}
-
-        {hasPayload && (
-          <pre
-            className="cw-mono cw-scroll-x"
-            style={{
-              margin: "10px 0 0",
-              maxHeight: 220,
-              overflowY: "auto",
-              border: "1px solid var(--rim)",
-              borderRadius: 12,
-              background: "var(--sheet)",
-              padding: "12px 14px",
-              fontSize: 11,
-              lineHeight: 1.65,
-              color: "var(--dim)",
-            }}
-          >
-            {JSON.stringify(event.payload, null, 2)}
-          </pre>
         )}
 
         {(event.latency_ms != null || event.cost_usd != null) && (
@@ -108,7 +111,7 @@ function Event({ event, last }: { event: AgentEvent; last: boolean }) {
               event.latency_ms != null ? `${event.latency_ms}ms` : null,
               event.cost_usd != null ? `$${event.cost_usd.toFixed(6)}` : null,
               event.input_tokens != null && event.output_tokens != null
-                ? `${event.input_tokens}→${event.output_tokens} tok`
+                ? `${(event.input_tokens + event.output_tokens).toLocaleString("en-US")} tokens`
                 : null,
             ]
               .filter(Boolean)
@@ -175,7 +178,7 @@ export function RunTrace({ runId, initialStatus }: { runId: string; initialStatu
           }}
         >
           {status === "running" ? "live" : status}
-          {events.length > 0 ? ` · ${events.length} events` : ""}
+          {events.length > 0 ? ` · ${events.length} steps` : ""}
         </span>
         {connectionError && status === "running" && (
           <span className="cw-mono" style={{ fontSize: 11, color: "var(--warn)" }}>
@@ -189,7 +192,7 @@ export function RunTrace({ runId, initialStatus }: { runId: string; initialStatu
           <Empty title={status === "running" ? "Waiting for events" : "No events recorded"}>
             {status === "running"
               ? "The stream is open. Steps appear here as the agent takes them."
-              : "This run finished without writing any audit events."}
+              : "This run finished without recording any steps."}
           </Empty>
         </div>
       ) : (

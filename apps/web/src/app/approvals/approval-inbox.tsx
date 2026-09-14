@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type Approval } from "@/lib/api";
 import { readAccount } from "@/lib/account";
 import { Empty } from "@/components/ui";
+import { approvalEffects, cleanText } from "@/lib/humanize";
 import { actionVerb, subjectOf, workflowOf } from "./labels";
 
 const POLL_MS = 5000;
@@ -158,7 +159,11 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
           const isEditing = editingId === approval.id;
           const isBusy = busyId === approval.id;
           const subject = subjectOf(approval);
-          const changes = Object.entries(approval.state_diff ?? {});
+          const effects = approvalEffects(
+            approval.action_type,
+            approval.state_diff as Record<string, unknown> | null,
+          );
+          const sources = approval.citations?.length ?? 0;
 
           return (
             <article
@@ -227,7 +232,7 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
                         maxWidth: "62ch",
                       }}
                     >
-                      {approval.rationale}
+                      {cleanText(approval.rationale)}
                     </p>
                   )}
 
@@ -309,31 +314,24 @@ export function ApprovalInbox({ initialApprovals }: { initialApprovals: Approval
                   <div>
                     <div className="cw-label">Evidence</div>
                     <div className="cw-num" style={{ marginTop: 10, fontSize: 23 }}>
-                      {approval.citations?.length ?? 0}
+                      {sources}
                     </div>
                     <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--quiet)" }}>
-                      sources read
+                      {sources === 1 ? "source read" : "sources read"}
                     </div>
                   </div>
 
                   <div>
                     <div className="cw-label">If you approve</div>
                     <ul style={{ listStyle: "none", margin: "10px 0 0", padding: 0 }}>
-                      {changes.length === 0 ? (
-                        <li style={{ fontSize: 13, color: "var(--quiet)" }}>no recorded change</li>
-                      ) : (
-                        changes.map(([key, value]) => (
-                          <li
-                            key={key}
-                            style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--dim)" }}
-                          >
-                            <span className="cw-mono" style={{ color: "var(--quiet)" }}>
-                              {key}
-                            </span>{" "}
-                            {String(value)}
-                          </li>
-                        ))
-                      )}
+                      {effects.map((line) => (
+                        <li
+                          key={line}
+                          style={{ fontSize: 13, lineHeight: 1.55, color: "var(--dim)", marginTop: 4 }}
+                        >
+                          {line}
+                        </li>
+                      ))}
                     </ul>
                   </div>
 

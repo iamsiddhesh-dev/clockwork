@@ -5,6 +5,7 @@ import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
 import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
+import { cleanText, runErrorText } from "@/lib/humanize";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,7 @@ export default async function RunsPage({ searchParams }: PageProps<"/runs">) {
                   overflow: "hidden",
                 }}
               >
-                {run.outcome ?? run.error ?? "—"}
+                {run.error ? runErrorText(run.error) : cleanText(run.outcome) || "—"}
               </p>
               <p
                 className="cw-mono"

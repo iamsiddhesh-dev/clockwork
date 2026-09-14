@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { Card, compactMoney } from "@/components/ui";
 import { ReplyBox } from "./reply-box";
+import { CHANNEL_LABELS } from "@/lib/humanize";
 
 export const dynamic = "force-dynamic";
 
@@ -29,13 +30,13 @@ export default async function ThreadDetailPage(props: PageProps<"/threads/[id]">
     <>
       <header className="cw-page-head" style={{ display: "block" }}>
         <Link href="/threads" className="cw-mono" style={{ fontSize: 11, color: "var(--quiet)" }}>
-          ← All threads
+          ← All conversations
         </Link>
         <div className="cw-row" style={{ alignItems: "flex-end", gap: 16 }}>
           <div style={{ flex: "1 1 260px", minWidth: 0 }}>
             <h1 className="cw-h1">{thread.contact_name ?? "Unknown contact"}</h1>
             <p className="cw-mono" style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)" }}>
-              {thread.contact_email ?? "no email on file"} · {thread.channel}
+              {thread.contact_email ?? "no email on file"} · {CHANNEL_LABELS[thread.channel] ?? "Conversation"}
             </p>
           </div>
           {deal?.score && (
@@ -103,7 +104,7 @@ export default async function ThreadDetailPage(props: PageProps<"/threads/[id]">
                 className="cw-mono"
                 style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)" }}
               >
-                {message.direction} · {formatDateTime(message.sent_at)}
+                {inbound ? "Client" : "You"} · {formatDateTime(message.sent_at)}
               </p>
             </li>
           );

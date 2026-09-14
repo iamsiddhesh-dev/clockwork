@@ -4,6 +4,7 @@ import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Card, compactMoney, Dot, Metric, SectionHead, TONES } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { WelcomeDialog } from "./welcome-dialog";
+import { TASK_LABELS, cleanText, runErrorText, stepLabel } from "@/lib/humanize";
 
 export const dynamic = "force-dynamic";
 
@@ -305,14 +306,14 @@ export default async function OverviewPage() {
                   </span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13.5, lineHeight: 1.45, color: "var(--sub)" }}>
-                      {event.text}
+                      {event.kind === "error" ? runErrorText(event.text) : cleanText(event.text) || stepLabel(event.tool)}
                     </div>
                     <Link
                       href={`/runs/${event.run_id}`}
                       className="cw-mono"
                       style={{ marginTop: 4, display: "block", fontSize: 11, color: "var(--quiet)" }}
                     >
-                      {event.tool ?? event.kind} · {relative(event.at)}
+                      {stepLabel(event.tool, event.kind === "model_call" ? "AI model" : "Step")} · {relative(event.at)}
                     </Link>
                   </div>
                   {event.cost_usd ? (
@@ -357,7 +358,7 @@ export default async function OverviewPage() {
                       {formatDate(task.due_at)}
                     </span>
                     <span style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.4 }}>
-                      {task.reason ?? `${task.kind} on ${task.subject_type}`}
+                      {cleanText(task.reason) || TASK_LABELS[task.kind] || "Check-in"}
                     </span>
                   </li>
                 ))}

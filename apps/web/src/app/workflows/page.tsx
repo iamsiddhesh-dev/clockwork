@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Dot, Empty, PageHead, TONES } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
+import { stepLabel } from "@/lib/humanize";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,7 @@ export default async function WorkflowsPage() {
                   {flow.blurb}
                 </div>
                 <div className="cw-mono" style={{ marginTop: 8, fontSize: 11, color: "var(--quiet)" }}>
-                  {flow.tools.join(" · ")}
+                  {flow.tools.map((tool) => stepLabel(tool, tool)).join(" · ")}
                 </div>
               </div>
 

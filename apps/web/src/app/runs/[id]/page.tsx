@@ -5,6 +5,7 @@ import { formatDateTime, triggerLabel } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { Card } from "@/components/ui";
 import { RunTrace } from "./run-trace";
+import { cleanText, runErrorText } from "@/lib/humanize";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export default async function RunDetailPage(props: PageProps<"/runs/[id]">) {
               whiteSpace: "pre-wrap",
             }}
           >
-            {run.outcome}
+            {cleanText(run.outcome)}
           </p>
         </Card>
       )}
@@ -54,11 +55,8 @@ export default async function RunDetailPage(props: PageProps<"/runs/[id]">) {
           <div className="cw-label" style={{ color: "var(--bad)" }}>
             Failed
           </div>
-          <p
-            className="cw-mono"
-            style={{ margin: "12px 0 0", fontSize: 12, lineHeight: 1.6, color: "var(--bad)" }}
-          >
-            {run.error}
+          <p style={{ margin: "12px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "var(--bad)" }}>
+            {runErrorText(run.error)}
           </p>
         </div>
       )}
