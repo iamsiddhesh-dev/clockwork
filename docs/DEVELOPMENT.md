@@ -64,12 +64,13 @@ Creates a populated workspace without calling the job feeds or a model, and prin
 cd apps/agent && PYTHONPATH=src python -m unittest discover -s tests -t .
 ```
 
-154 tests, standard library only, no network or database. They cover:
+160 tests, standard library only, no network or database. They cover:
 - quote arithmetic, invoice numbering and payment-terms parsing
 - link classification, including not marking "applications close on 30 September" as closed
 - evidence verification and score caps
 - greetings
-- rate-limit retry detection
+- rate-limit and transient-error retry detection
+- cleaning ids the model copies back with look-alike dashes
 - workflow counts and page-window arithmetic
 
 ## Deploying to Vercel
@@ -97,7 +98,9 @@ A 403 or 429 is recorded as "couldn't check", not "gone". Hacker News postings a
 
 **Paging.** Opportunities, runs, threads and deals are paged server-side with `?limit=&offset=`. The total is returned in an `X-Total-Count` header, and header counts are counted in the database. Quotes and invoices are not paged, because the Money page compares every deal against every quote.
 
-**Payment reminders.** Tone escalates by `invoice.chase_count`, which only increases when a reminder is approved. Marking an invoice paid cancels the pending reminder task.
+**Payment reminders.** Tone escalates by `invoice.chase_count`, which only increases when a reminder is approved. Marking an invoice paid cancels the pending reminder task. A scheduled payment check calls `chase_payment_for` directly rather than through the agent, and retries once on a database or network timeout.
+
+**Check-ins.** A scheduled follow-up or quote check-in is pushed back 3 days, without a model call, while a drafted reply on that conversation is still waiting for approval. A pitch follow-up for a pitch that was never approved is skipped.
 
 **Model roles.** `models.py` and `ledger.invoke_model` are the only places a model provider is named. Every other call site passes a `Role`.
 
@@ -114,6 +117,7 @@ apps/agent/                FastAPI + the Strands agent
     evidence.py            evidence index, citation checks, score caps
     executor.py            performs an approval's action after a human approves
     greeting.py            who a message greets, decided in code
+    ids.py                 cleans ids the model copies back with look-alike dashes
     importer.py            reads GitHub and a portfolio site into the profile
     ledger.py              model calls, token costs, daily spend cap
     models.py              model per role, and pricing

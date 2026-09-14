@@ -23,19 +23,21 @@ Source → Score → Pitch → Reply → Quote → Invoice → Chase → Paid
 3. **Drafts a pitch** when you choose a lead.
 4. **Handles the reply.** A client writes in through your public intake form, or you paste their reply into the conversation. The agent qualifies the lead and drafts your answer, plus a quote when one is needed.
 5. **Quotes, invoices and chases.** Line items come from the model; totals, invoice numbers and due dates are calculated in Python. No invoice until you record that the client accepted. Overdue invoices get a reminder whose tone escalates each time.
-6. **Follows up by itself.** Drafting a pitch or reply, or sending a quote or invoice, schedules a check-in. When it's due, the agent runs with no one present and nudges only if the client hasn't answered.
+6. **Follows up by itself.** Drafting a pitch or reply, or sending a quote or invoice, schedules a check-in. When it's due, the agent runs with no one present and nudges only if the client hasn't answered. A check-in waits while a drafted reply is still unapproved, and a payment check drafts a reminder once an invoice is overdue.
 7. **Asks first.** Every client-facing action waits in an Approval Inbox with the text, the reason, what it read, and what will change.
 8. **Shows its work.** Every run has a trace of its model calls, tool calls, steps and cost.
 
 ## Try it
 
-1. Open the **[live demo](https://clockwork-live.vercel.app)** and set up a workspace: name, skills, rate, and a GitHub or portfolio link.
-2. Setup reads your work, finds leads, checks links and scores a first batch. Open **Opportunities** to see scores and the projects they cite.
-3. **Draft a pitch** on a lead and approve it in **Approvals**.
-4. In **Conversations**, paste a made-up client reply asking for a quote. The agent drafts a reply and usually a quote.
-5. Approve the quote. On **Money**, press **Client accepted**, then **Raise invoice**, and approve it.
-6. On a wide screen, press **+7d** in the top bar until the invoice is overdue. The agent drafts a payment reminder.
-7. Open **Runs** to see what each run did and what it cost.
+Use a wide browser window.
+
+1. Open the **[live demo](https://clockwork-live.vercel.app)** and set up a workspace: name, title, email, time zone, skills, rate, and a GitHub or portfolio link. Press **Find me work**. Setup takes about 1–2 minutes and opens the Overview with a summary.
+2. Open **Opportunities**. Each reason on a scored lead cites one of your projects and links to it.
+3. Press **Draft a pitch** on a lead and approve it in **Approvals**.
+4. In **Conversations**, open the new conversation, paste a made-up client reply asking for a quote, and press **Add reply**. The agent qualifies the lead and drafts a reply.
+5. On **Money**, press **Draft quote** if the agent didn't already draft one. Approve the quote, press **Client accepted**, then **Raise invoice**, and approve the invoice.
+6. Press **+7d** in the top bar and wait until it shows how many check-ins ran, then **+7d** and **+3d** again to pass the due date. A payment reminder appears in **Approvals**.
+7. Open **Runs** to see each run's steps, timings and cost.
 
 Models run on Groq's free tier (8,000 tokens per minute per model). If a step reports a rate limit, wait a minute and retry.
 
@@ -45,7 +47,7 @@ Models run on Groq's free tier (8,000 tokens per minute per model). If a step re
 
 - **Agent loop.** A client message, a pasted reply and scheduled check-ins call `run_agent()`, where a Strands agent reads the situation and chooses tools.
 - **Buttons.** Setup, find leads, score, pitch, quote, invoice and chase call the same tool code directly. Both paths are recorded as runs.
-- **Time trigger.** Due tasks are picked up every 5 minutes on Vercel (a GitHub Action calls a secret-protected `POST /tasks/tick`) or every 30 seconds locally. A virtual clock routes every time read through `clock.now()`, so the demo can move days ahead.
+- **Time trigger.** Due tasks are picked up every 5 minutes on Vercel (a GitHub Action calls a secret-protected `POST /tasks/tick`) or every 30 seconds locally. Check-ins wake the agent; payment checks call the chase code directly, since there is no decision for a model to make. A virtual clock routes every time read through `clock.now()`, so the demo can move days ahead.
 - **Approval gate in code.** Approval-gated tools have no code path that sends. They write a pending `approval` row, and a separate executor acts only after a human approves.
 
 ## How it uses Strands Agents
@@ -74,6 +76,8 @@ Costs are logged per run. A daily spend cap switches the orchestrator to the 20b
 - **Scores need evidence.** Citations are checked against a numbered list of the freelancer's real projects. Skills alone cap a score at 59; no valid evidence caps it at 40.
 - **Greetings decided in code.** Job boards give usernames and company names, so pitches greet "Hi there," and whatever greeting the model writes is corrected before the draft reaches the Approval Inbox.
 - **Closed postings can't be pitched.** Links are checked first. A board that blocks the check is recorded as "couldn't check", not "closed".
+- **Ids are cleaned before lookups.** The model sometimes copies ids back with look-alike dash characters; every tool normalises them, after a live payment check missed an overdue invoice because of it.
+- **No backend data on screen.** Approval cards, run traces and errors are shown in plain language, without ids, field names or raw JSON.
 
 ## Known limits
 
@@ -97,7 +101,7 @@ PYTHONPATH=src uvicorn clockwork.api:app --port 8000
 cd apps/web && cp .env.example .env.local && npm install && npm run dev
 ```
 
-Full setup, tests (154, standard library only), Vercel deployment and code layout: **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+Full setup, tests (160, standard library only), Vercel deployment and code layout: **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
 ## Licence
 
