@@ -5,14 +5,11 @@ import { ApiDown, Card, compactMoney, Dot, Metric, SectionHead, TONES } from "@/
 import { formatDate } from "@/lib/format";
 import { WelcomeDialog } from "./welcome-dialog";
 import { TASK_LABELS, cleanText, runErrorText, stepLabel } from "@/lib/humanize";
+import { LocalTime } from "@/components/local-time";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Overview" };
-
-function timeOnly(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-}
 
 function relative(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -196,14 +193,14 @@ export default async function OverviewPage() {
               </span>
             </div>
             <dl style={{ margin: "14px 0 0", display: "flex", flexDirection: "column" }}>
-              {[
+              {([
                 ["RUNS", String(runs.total)],
                 [
                   "SUCCESS",
                   runs.success_rate === null ? "—" : `${Math.round(runs.success_rate * 100)}%`,
                 ],
-                ["LAST RUN", runs.last_at ? timeOnly(runs.last_at) : "—"],
-              ].map(([label, value]) => (
+                ["LAST RUN", runs.last_at ? <LocalTime iso={runs.last_at} mode="time" /> : "—"],
+              ] as [string, React.ReactNode][]).map(([label, value]) => (
                 <div
                   key={label}
                   style={{
@@ -299,7 +296,7 @@ export default async function OverviewPage() {
                     className="cw-mono"
                     style={{ fontSize: 11, lineHeight: 1.5, color: "var(--quiet)", width: 52, flex: "none" }}
                   >
-                    {timeOnly(event.at)}
+                    <LocalTime iso={event.at} mode="time" />
                   </span>
                   <span style={{ marginTop: 6, flex: "none" }}>
                     <Dot tone={EVENT_TONE[event.kind] ?? "quiet"} />

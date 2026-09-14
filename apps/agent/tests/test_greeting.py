@@ -123,6 +123,12 @@ class TestApplyGreeting(unittest.TestCase):
         body = "Hi there, AI Engineer, Agent Builder. I built workflow-to-agent-converter."
         self.assertEqual(apply_greeting(body, None), "Hi there, I built workflow-to-agent-converter.")
 
+    def test_drops_a_job_title_on_the_line_after_the_greeting(self):
+        body = "Hi there,\nFull‑Stack Engineer – I built the workflow converter."
+        self.assertEqual(apply_greeting(body, None), "Hi there,\nI built the workflow converter.")
+        body = "Hi there,\n\nFull-Stack Engineer - I built it."
+        self.assertEqual(apply_greeting(body, None), "Hi there,\n\nI built it.")
+
     def test_keeps_a_real_first_sentence_after_the_greeting(self):
         for body, expected in (
             ("Hi there, thanks for posting. I can help.", "Hi there, thanks for posting. I can help."),

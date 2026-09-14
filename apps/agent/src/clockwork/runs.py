@@ -53,7 +53,13 @@ def _error_text(exc: BaseException) -> str:
 
 
 @contextmanager
-def manual_run(user_id: str, *, label: str, trigger_ref: str | None = None) -> Iterator[RunRecord]:
+def manual_run(
+    user_id: str,
+    *,
+    label: str,
+    trigger_ref: str | None = None,
+    trigger_type: str = "manual",
+) -> Iterator[RunRecord]:
     """Record everything inside this block as one run, started by a person.
 
     A failure still ends the run -- marked `failed` with the reason -- and
@@ -66,7 +72,7 @@ def manual_run(user_id: str, *, label: str, trigger_ref: str | None = None) -> I
         .insert(
             {
                 "user_id": user_id,
-                "trigger_type": "manual",
+                "trigger_type": trigger_type,
                 "trigger_ref": trigger_ref,
                 "status": "running",
             }

@@ -131,7 +131,12 @@ _SALUTATION = re.compile(
 # "!" or line end counts. A real opening sentence ("Thanks for the
 # post.", "I built...") has a lowercase word in it, and one that starts
 # with "I" is the sender talking about themselves, so both are kept.
-_ADDRESSEE = re.compile(r"^[ \t]*(?P<words>[^\n.!?]{1,60}?)[ \t]*[.!:;—–-]+[ \t]*")
+# The addressee may sit on the greeting's line or start the next one
+# ("Hi there,\nFull-Stack Engineer – I built..."). A dash only ends it when
+# spaced, so the hyphen inside "Full-Stack" stays part of the title.
+_ADDRESSEE = re.compile(
+    r"^(?P<lead>\s*)(?P<words>[^\n.!?:;]{1,60}?)(?:[ \t]*[.!:;]+|[ \t]+[—–‑-]+)[ \t]*"
+)
 _JOINERS = {"and", "&", "of", "the", "at"}
 _SELF = re.compile(r"^I(?:'|’|$)")
 
@@ -145,7 +150,7 @@ def _strip_addressee(rest: str) -> str:
         return rest
     if not all(w[0].isupper() or w.lower() in _JOINERS for w in words):
         return rest
-    return rest[match.end():]
+    return match.group("lead") + rest[match.end():]
 
 
 def apply_greeting(body: str, raw_name: str | None) -> str:

@@ -13,6 +13,7 @@ from ..models import Role
 from ..schemas import ExtractedRequirements, LeadScore
 from .approvals import create_approval
 from .scheduling import write_task
+from ..ids import clean_id
 
 
 @tool
@@ -62,6 +63,7 @@ def get_thread(thread_id: str) -> dict:
     Args:
         thread_id: The thread's id.
     """
+    thread_id = clean_id(thread_id)
     user_id = current_user_id()
     client = get_client()
 
@@ -105,6 +107,7 @@ def log_message(thread_id: str, direction: str, body: str) -> dict:
             the client).
         body: The message text.
     """
+    thread_id = clean_id(thread_id)
     if direction not in ("inbound", "outbound"):
         return {
             "status": "error",
@@ -135,6 +138,7 @@ def extract_requirements(thread_id: str) -> dict:
     Args:
         thread_id: The thread to extract requirements from.
     """
+    thread_id = clean_id(thread_id)
     thread = get_thread(thread_id)
     messages = thread["content"][0]["json"]["messages"]
     transcript = "\n".join(f"[{m['direction']}] {m['body']}" for m in messages)
@@ -162,6 +166,7 @@ def qualify_lead(deal_id: str) -> dict:
     Args:
         deal_id: The deal to qualify.
     """
+    deal_id = clean_id(deal_id)
     user_id = current_user_id()
     client = get_client()
 
@@ -213,6 +218,7 @@ def draft_reply(thread_id: str) -> dict:
     Args:
         thread_id: The conversation to reply within.
     """
+    thread_id = clean_id(thread_id)
     thread = get_thread(thread_id)
     messages = thread["content"][0]["json"]["messages"]
     transcript = "\n".join(f"[{m['direction']}] {m['body']}" for m in messages)

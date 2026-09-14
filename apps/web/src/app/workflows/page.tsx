@@ -2,8 +2,8 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Dot, Empty, PageHead, TONES } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
 import { stepLabel } from "@/lib/humanize";
+import { LocalTime } from "@/components/local-time";
 
 export const dynamic = "force-dynamic";
 
@@ -80,7 +80,7 @@ export default async function WorkflowsPage() {
                 {flow.state}
                 <br />
                 <span style={{ color: "var(--quiet)" }}>
-                  {flow.last_at ? formatDateTime(flow.last_at) : "—"}
+                  {flow.last_at ? <LocalTime iso={flow.last_at} /> : "—"}
                 </span>
               </div>
 

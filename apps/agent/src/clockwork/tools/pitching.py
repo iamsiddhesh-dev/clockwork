@@ -24,6 +24,7 @@ from ..models import Role
 from ..sources.checking import is_dead
 from .approvals import create_approval
 from .scheduling import write_task
+from ..ids import clean_id
 
 # Same reasoning as the fit scorer's cap: the ask is near the top of a
 # posting, and the writer model shares a per-minute token budget.
@@ -40,6 +41,7 @@ def _load_profile(user_id: str) -> dict | None:
 def draft_pitch_for(opportunity_id: str) -> dict:
     """Draft an outbound pitch for one opportunity and queue it for
     approval. Returns the approval id and the drafted text."""
+    opportunity_id = clean_id(opportunity_id)
     user_id = current_user_id()
     client = get_client()
 

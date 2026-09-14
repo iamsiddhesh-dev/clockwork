@@ -16,11 +16,13 @@ Two callers:
     virtual clock at all.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .agent import Trigger, run_agent
 from .clock import now as clock_now
 from .db import get_client
+from .runs import manual_run
+from .tools.money import chase_payment_for
 # Shared with the retry helper on purpose: both need to see through
 # Strands' EventLoopException wrapper, and two copies of that logic is
 # exactly how one of them silently rots.
@@ -32,6 +34,10 @@ from .retry import root_rate_limit_error
 # transient TPM blip), and it should surface as `failed` rather than
 # retry forever.
 MAX_TASK_ATTEMPTS = 5
+
+# How far a check-in is pushed back while the reply it would follow up is
+# still waiting for approval.
+RECHECK_DAYS = 3
 
 
 def _thread_for_quote(quote_id: str, user_id: str) -> str | None:
@@ -82,6 +88,63 @@ def _thread_for_opportunity(opportunity_id: str, user_id: str) -> str | None:
         .execute()
     )
     return deal.data["thread_id"] if deal and deal.data else None
+
+
+def _has_pending_reply(thread_id: str, user_id: str) -> bool:
+    """Whether a reply drafted on this conversation is still waiting for a
+    human decision."""
+    res = (
+        get_client()
+        .table("approval")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("status", "pending")
+        .eq("action_type", "send_email")
+        .eq("payload->>thread_id", thread_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(res.data)
+
+
+def _run_payment_check(task: dict) -> dict:
+    """A due payment check, run in code rather than by the orchestrator.
+
+    There is no decision here for a model to make: chase_payment_for already
+    knows every reason not to chase (paid, void, not yet due) and drafts the
+    reminder otherwise. Routing it through the agent only added a way to
+    fail -- a live run had the model rewrite the invoice id with look-alike
+    dash characters, the lookup found nothing, and no reminder was drafted
+    for an invoice that was overdue.
+    """
+    client = get_client()
+    task_id = task["id"]
+    try:
+        with manual_run(
+            task["user_id"], label="Payment check", trigger_ref=task_id, trigger_type="schedule"
+        ) as run:
+            result = chase_payment_for(task["subject_id"])
+            if result.get("action") == "chase_drafted":
+                run.outcome = (
+                    f"The invoice is {result.get('days_overdue')} days overdue, so a payment "
+                    "reminder was drafted for your approval."
+                )
+            else:
+                run.outcome = f"No reminder needed: {result.get('reason')}."
+            run.step(run.outcome, tool="chase_payment")
+    except Exception as exc:
+        return _task_failed(task, exc)
+
+    client.table("task").update({"status": "done"}).eq("id", task_id).execute()
+    return {
+        "task_id": task_id,
+        "kind": task["kind"],
+        "subject_type": task["subject_type"],
+        "subject_id": task["subject_id"],
+        "run_id": run.id,
+        "run_status": "completed",
+        "outcome": run.outcome,
+    }
 
 
 def _pending_tasks() -> list[dict]:
@@ -145,6 +208,37 @@ def _run_task(task: dict) -> dict:
             }
         task = {**task, "subject_type": "thread", "subject_id": thread_id}
 
+    if task["kind"] == "invoice_chase":
+        return _run_payment_check(task)
+
+    # A check-in on a conversation whose last drafted reply is still waiting
+    # for approval has nothing to add: the freelancer hasn't acted yet.
+    # Letting the agent run drafted a fresh reply on every check-in, so a
+    # week of fast-forwarding piled up near-identical drafts. Pushed back
+    # instead, without a model call, to look again later.
+    if task["kind"] in ("follow_up", "quote_chase"):
+        thread_id = (
+            task["subject_id"]
+            if task["subject_type"] == "thread"
+            else _thread_for_quote(task["subject_id"], task["user_id"])
+            if task["kind"] == "quote_chase"
+            else None
+        )
+        if thread_id and _has_pending_reply(thread_id, task["user_id"]):
+            due = clock_now(task["user_id"]) + timedelta(days=RECHECK_DAYS)
+            client.table("task").update({"status": "pending", "due_at": due.isoformat()}).eq(
+                "id", task_id
+            ).execute()
+            return {
+                "task_id": task_id,
+                "kind": task["kind"],
+                "subject_type": task["subject_type"],
+                "subject_id": task["subject_id"],
+                "run_id": None,
+                "run_status": "skipped",
+                "outcome": "A drafted reply is still waiting for your approval, so no new message was drafted.",
+            }
+
     if task["kind"] == "follow_up" and task["subject_type"] == "thread":
         # Deliberately not "decide whether the client replied" as an open
         # judgement call -- a real run confused "approved and sent" with
@@ -168,21 +262,6 @@ def _run_task(task: dict) -> dict:
             "\"still a draft\" -- an outbound message in get_thread's "
             "output means it was already sent. Go by message order only."
         )
-    elif task["kind"] == "invoice_chase":
-        # No judgement call to make here at all. chase_payment already
-        # knows every reason not to send -- paid, void, still a draft, not
-        # yet due -- and returns action "none" for each. Asking the model
-        # to decide first would only add a way for it to get that wrong,
-        # and getting it wrong means dunning a client who already paid.
-        prompt = (
-            f"Scheduled payment check on invoice {task['subject_id']}. It was "
-            f"scheduled because: {reason}\n\n"
-            f"Call chase_payment({task['subject_id']!r}) and report exactly what it "
-            "returned. If it returns action \"none\", that is the correct outcome -- "
-            "the invoice is paid, void, or not yet due. Do not draft anything else, "
-            "and do not use any other tool."
-        )
-
     elif task["kind"] == "quote_chase":
         # Same mechanical rule as the thread follow-up, for the same
         # reason: comparing the direction of the last message is something
@@ -249,39 +328,45 @@ def _run_task(task: dict) -> dict:
             "outcome": run.outcome,
         }
     except Exception as exc:
-        rate_limit_exc = root_rate_limit_error(exc)
-        if rate_limit_exc is not None:
-            # Requeue rather than fail outright -- this is the same
-            # transient TPM blip that's hit repeatedly in testing, and
-            # manually resetting a failed task back to 'pending' recovered
-            # cleanly every time. Automating exactly that recovery is safe
-            # *here* in a way it wouldn't be for the interactive
-            # orchestrator call: a partially completed run could in theory
-            # re-run draft_reply on retry and duplicate an approval card,
-            # but nothing sends without a human clicking approve regardless
-            # -- worst case is a human sees two near-identical drafts and
-            # rejects one, not a duplicate send. Capped so a persistently
-            # throttled account still surfaces as failed instead of
-            # retrying forever.
-            current_attempts = task["attempts"] + 1
-            if current_attempts < MAX_TASK_ATTEMPTS:
-                client.table("task").update({"status": "pending"}).eq("id", task_id).execute()
-                return {
-                    "task_id": task_id,
-                    "kind": task["kind"],
-                    "requeued": True,
-                    "attempts": current_attempts,
-                    "error": str(rate_limit_exc),
-                }
-            client.table("task").update({"status": "failed"}).eq("id", task_id).execute()
+        return _task_failed(task, exc)
+
+
+def _task_failed(task: dict, exc: Exception) -> dict:
+    client = get_client()
+    task_id = task["id"]
+    rate_limit_exc = root_rate_limit_error(exc)
+    if rate_limit_exc is not None:
+        # Requeue rather than fail outright -- this is the same
+        # transient TPM blip that's hit repeatedly in testing, and
+        # manually resetting a failed task back to 'pending' recovered
+        # cleanly every time. Automating exactly that recovery is safe
+        # *here* in a way it wouldn't be for the interactive
+        # orchestrator call: a partially completed run could in theory
+        # re-run draft_reply on retry and duplicate an approval card,
+        # but nothing sends without a human clicking approve regardless
+        # -- worst case is a human sees two near-identical drafts and
+        # rejects one, not a duplicate send. Capped so a persistently
+        # throttled account still surfaces as failed instead of
+        # retrying forever.
+        current_attempts = task["attempts"] + 1
+        if current_attempts < MAX_TASK_ATTEMPTS:
+            client.table("task").update({"status": "pending"}).eq("id", task_id).execute()
             return {
                 "task_id": task_id,
                 "kind": task["kind"],
-                "error": f"gave up after {current_attempts} attempts: {rate_limit_exc}",
+                "requeued": True,
+                "attempts": current_attempts,
+                "error": str(rate_limit_exc),
             }
-
         client.table("task").update({"status": "failed"}).eq("id", task_id).execute()
-        return {"task_id": task_id, "kind": task["kind"], "error": str(exc)}
+        return {
+            "task_id": task_id,
+            "kind": task["kind"],
+            "error": f"gave up after {current_attempts} attempts: {rate_limit_exc}",
+        }
+
+    client.table("task").update({"status": "failed"}).eq("id", task_id).execute()
+    return {"task_id": task_id, "kind": task["kind"], "error": str(exc)}
 
 
 def tick(user_id: str) -> list[dict]:

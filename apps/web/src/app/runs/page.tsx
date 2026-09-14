@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { formatDateTime, triggerLabel } from "@/lib/format";
+import { triggerLabel } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
 import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 import { cleanText, runErrorText } from "@/lib/humanize";
+import { LocalTime } from "@/components/local-time";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export default async function RunsPage({ searchParams }: PageProps<"/runs">) {
                 className="cw-mono"
                 style={{ margin: "8px 0 0", fontSize: 11, color: "var(--quiet)" }}
               >
-                {formatDateTime(run.started_at)} · ${Number(run.total_cost_usd ?? 0).toFixed(4)}
+                <LocalTime iso={run.started_at} /> · ${Number(run.total_cost_usd ?? 0).toFixed(4)}
               </p>
             </Link>
           ))}

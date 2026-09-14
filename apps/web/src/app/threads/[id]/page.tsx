@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { Card, compactMoney } from "@/components/ui";
 import { ReplyBox } from "./reply-box";
 import { CHANNEL_LABELS } from "@/lib/humanize";
+import { LocalTime } from "@/components/local-time";
 
 export const dynamic = "force-dynamic";
 
@@ -104,7 +104,7 @@ export default async function ThreadDetailPage(props: PageProps<"/threads/[id]">
                 className="cw-mono"
                 style={{ margin: "12px 0 0", fontSize: 11, color: "var(--quiet)" }}
               >
-                {inbound ? "Client" : "You"} · {formatDateTime(message.sent_at)}
+                {inbound ? "Client" : "You"} · <LocalTime iso={message.sent_at} />
               </p>
             </li>
           );

@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
 import { requireAccount } from "@/lib/account-server";
 import { ApiDown, Empty, PageHead } from "@/components/ui";
 import { Pager } from "@/components/pager";
 import { offsetFor, PAGE_SIZE, pageFrom } from "@/lib/paging";
 import { CHANNEL_LABELS } from "@/lib/humanize";
+import { LocalTime } from "@/components/local-time";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +67,7 @@ export default async function ThreadsPage({ searchParams }: PageProps<"/threads"
                 </span>
                 <div className="cw-mono" style={{ marginTop: 6, fontSize: 11, color: "var(--quiet)" }}>
                   {thread.last_message_at
-                    ? formatDateTime(thread.last_message_at)
+                    ? <LocalTime iso={thread.last_message_at} />
                     : "no messages"}
                 </div>
               </div>

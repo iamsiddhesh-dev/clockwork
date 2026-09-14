@@ -21,6 +21,7 @@ from ..evidence import capped_score, evidence_index, render_index, strip_refs, v
 from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import FitScore
+from ..ids import clean_id
 
 # Postings run long (a full job description). The signal for "does this
 # suit me" -- role, stack, contract-vs-salaried -- is near the top, and
@@ -220,6 +221,7 @@ def score_fit(opportunity_id: str) -> dict:
     Args:
         opportunity_id: The opportunity to score.
     """
+    opportunity_id = clean_id(opportunity_id)
     try:
         return {"status": "success", "content": [{"json": score_opportunity(opportunity_id)}]}
     except (ProfileMissingError, ValueError) as exc:

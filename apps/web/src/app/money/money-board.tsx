@@ -40,12 +40,16 @@ export function MoneyBoard({
 
   const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
 
-  // A deal is quotable once it exists and does not already have a live
-  // quote. Listed here rather than only on the pipeline so the whole
-  // money tail sits on one screen.
+  // A deal is quotable once it exists and has no quote still in play --
+  // drafted, sent or accepted. Accepted was missing, so the moment a client
+  // said yes the deal was offered for quoting again beside its own invoice.
+  // Listed here rather than only on the pipeline so the whole money tail
+  // sits on one screen.
   const quotable = useMemo(() => {
     const live = new Set(
-      quotes.filter((q) => q.status === "draft" || q.status === "sent").map((q) => q.deal_id),
+      quotes
+        .filter((q) => q.status === "draft" || q.status === "sent" || q.status === "accepted")
+        .map((q) => q.deal_id),
     );
     return deals.filter((d) => !live.has(d.id) && d.stage !== "lost" && d.stage !== "won");
   }, [deals, quotes]);

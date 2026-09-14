@@ -39,6 +39,7 @@ from ..ledger import invoke_model
 from ..models import Role
 from ..schemas import QuoteDraft
 from .approvals import create_approval
+from ..ids import clean_id
 
 # How long a quote stands before it goes stale. Long enough not to feel
 # like pressure, short enough that a price from two months ago isn't
@@ -240,6 +241,7 @@ def _load_deal(deal_id: str, user_id: str) -> dict:
 
 def draft_quote_for(deal_id: str) -> dict:
     """Price one deal and queue the quote for approval. Nothing is sent."""
+    deal_id = clean_id(deal_id)
     user_id = current_user_id()
     client = get_client()
 
@@ -387,6 +389,7 @@ def draft_quote(deal_id: str) -> dict:
 def draft_invoice_for(quote_id: str) -> dict:
     """Raise an invoice against an accepted quote and queue it for
     approval. Nothing is sent."""
+    quote_id = clean_id(quote_id)
     user_id = current_user_id()
     client = get_client()
 
@@ -521,6 +524,7 @@ def chase_payment_for(invoice_id: str) -> dict:
     """Draft the next payment reminder for an overdue invoice and queue it
     for approval. Returns `{"action": "none", ...}` if there is nothing to
     chase -- which is the correct outcome most of the time."""
+    invoice_id = clean_id(invoice_id)
     user_id = current_user_id()
     client = get_client()
 

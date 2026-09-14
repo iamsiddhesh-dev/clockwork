@@ -21,6 +21,7 @@ from strands import tool
 from ..clock import now as clock_now
 from ..context import current_user_id
 from ..db import get_client
+from ..ids import clean_id
 
 
 def write_task(*, kind: str, subject_type: str, subject_id: str, due_in_days: float, reason: str) -> str:
@@ -72,6 +73,7 @@ def schedule_task(kind: str, subject_type: str, subject_id: str, due_in_days: fl
             into the scheduled run's prompt so it stays grounded in why
             it exists rather than firing blind.
     """
+    subject_id = clean_id(subject_id)
     task_id = write_task(
         kind=kind, subject_type=subject_type, subject_id=subject_id,
         due_in_days=due_in_days, reason=reason,

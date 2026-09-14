@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { Approval } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
 import { SectionHead } from "@/components/ui";
 import { actionVerb, subjectOf, workflowOf } from "./labels";
+import { LocalTime } from "@/components/local-time";
 
 /** What happened to a card once someone decided on it. */
 const OUTCOME: Record<string, { label: string; color: string }> = {
@@ -64,7 +64,7 @@ export function ApprovalHistory({ decided }: { decided: Approval[] }) {
               </div>
 
               <span className="cw-mono" style={{ flex: "none", fontSize: 11, color: "var(--quiet)" }}>
-                {approval.decided_at ? formatDateTime(approval.decided_at) : "—"}
+                {approval.decided_at ? <LocalTime iso={approval.decided_at} /> : "—"}
               </span>
 
               {approval.run_id && (
